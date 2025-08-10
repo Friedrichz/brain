@@ -200,18 +200,24 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 def fetch_track_record_json(fund_id: str) -> dict:
-    """Fetch the track_record.json from Google Drive for the given fund_id."""
+    """Fetch the track_record.json from Google Drive for the given fund_id inside a parent folder."""
     # Authenticate using service account from Streamlit secrets
     creds_dict = dict(st.secrets["gcp_service_account"])
     creds = service_account.Credentials.from_service_account_info(creds_dict)
     drive_service = build('drive', 'v3', credentials=creds)
 
-    # Search for the folder with the fund_id as its name
-    folder_query = f"name = '{fund_id}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    # Get parent folder ID from secrets
+    parent_folder_id = st.secrets["drive"]["parent_folder_id"]
+
+    # Search for the folder with the fund_id as its name inside the parent folder
+    folder_query = (
+        f"'{parent_folder_id}' in parents and "
+        f"name = '{fund_id}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    )
     folder_results = drive_service.files().list(q=folder_query, fields="files(id, name)").execute()
     folders = folder_results.get('files', [])
     if not folders:
-        st.warning(f"No Google Drive folder found for fund_id: {fund_id}")
+        st.warning(f"No Google Drive folder found for fund_id: {fund_id} in parent folder.")
         return None
     folder_id = folders[0]['id']
 
