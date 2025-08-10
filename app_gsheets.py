@@ -191,12 +191,8 @@ def build_exposure_df(row: pd.Series, prefixes: List[str]) -> pd.DataFrame:
 
 
 def show_performance_view() -> None:
-    """Render the performance overview page using Google Sheets data.
+    """Render the performance overview page using Google Sheets data, with asset class filter."""
 
-    Retrieves the configured performance sheet, removes duplicates by
-    Fund Name/Share Class/Currency/Date, hides irrelevant columns and
-    provides a fund selector for filtering.
-    """
     # Pull sheet configuration from secrets
     if not ("fund_performances" in st.secrets and "sheet_id" in st.secrets["fund_performances"]):
         st.error("Missing 'fund_performances' configuration in secrets.")
@@ -208,6 +204,28 @@ def show_performance_view() -> None:
         st.warning("No data returned from the performance sheet.")
         return
 
+    # --- Load securities_master for asset class mapping ---
+    if not ("securities_master" in st.secrets and "sheet_id" in st.secrets["securities_master"]):
+        st.error("Missing 'securities_master' configuration in secrets.")
+        return
+    sec_sheet_id = st.secrets["securities_master"].get("sheet_id")
+    sec_worksheet = st.secrets["securities_master"].get("worksheet", "Sheet1")
+    sec_df = load_sheet(sec_sheet_id, sec_worksheet)
+    if sec_df.empty or "canonical_id" not in sec_df.columns or "asset_class" not in sec_df.columns:
+        st.warning("No data or missing columns in securities_master.")
+        return
+
+    # Merge asset_class into fund performances
+    if "fund_id" in df.columns:
+        df = df.merge(
+            sec_df[["canonical_id", "asset_class"]],
+            left_on="fund_id",
+            right_on="canonical_id",
+            how="left"
+        )
+    else:
+        df["asset_class"] = None  # fallback if fund_id missing
+
     # Drop duplicates by Fund Name, Share Class, Currency and Date
     dedup_columns = [c for c in ["Fund Name", "Share Class", "Currency", "Date"] if c in df.columns]
     if dedup_columns:
@@ -218,10 +236,19 @@ def show_performance_view() -> None:
     df = df[df["MTD"].notna() & df["MTD"].astype(str).str.strip().ne("")]
     df = df[df["Fund Name"].notna() & df["Fund Name"].astype(str).str.strip().ne("")]
 
-    # Hide unwanted columns
+    # Asset Class Filter (do not show in table)
+    asset_classes = sorted(df["asset_class"].dropna().unique().tolist())
+    selected_asset_classes = st.multiselect(
+        "Filter by Asset Class", asset_classes, default=[]
+    )
+    if selected_asset_classes:
+        df = df[df["asset_class"].isin(selected_asset_classes)]
+
+    # Hide unwanted columns (including any from the merged table)
     cols_to_hide = [
         "fund_id", "currency", "WTD", "YTD", "Sender", "Category", "Currency",
-        "Net", "Gross", "Long Exposure", "Short Exposure", "Correct", "Received"
+        "Net", "Gross", "Long Exposure", "Short Exposure", "Correct", "Received",
+        "canonical_id", "asset_class"  # ensure merged columns are hidden
     ]
     df_display = df.reset_index(drop=True)
     df_display = df_display.drop(columns=[c for c in cols_to_hide if c in df_display.columns], errors="ignore")
@@ -355,12 +382,12 @@ def show_fund_monitor() -> None:
 
 def main() -> None:
     """Main entry point for the Streamlit application."""
-    # st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
+    st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
 
     # Sidebar navigation using option_menu
     with st.sidebar:
         page = option_menu(
-            "Navigation",
+            # "Navigation",
             ["Performance Est", "Market Views", "Fund Monitor"],
             # icons=["bar-chart", "globe", "clipboard-data"],  # optional: choose icons
             # menu_icon="cast",  # optional: sidebar header icon
@@ -377,7 +404,7 @@ def main() -> None:
         st.header("Market Views")
         show_market_view()
     elif page == "Fund Monitor":
-        st.title("Fund Monitoring Dashboard")
+        # st.title("Fund Monitoring Dashboard")
         st.header("Fund Monitor")
         show_fund_monitor()
 
