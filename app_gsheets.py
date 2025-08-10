@@ -404,13 +404,13 @@ def show_fund_monitor() -> None:
     sec_sheet_id = st.secrets["securities_master"].get("sheet_id")
     sec_worksheet = st.secrets["securities_master"].get("worksheet", "Sheet1")
     sec_df = load_sheet(sec_sheet_id, sec_worksheet)
-    st.write("securities_master columns:", sec_df.columns.tolist())
     if sec_df.empty or "canonical_id" not in sec_df.columns or "canonical_name" not in sec_df.columns:
         st.warning("No data or missing columns in securities_master.")
         return
 
-    # Use canonical fund list for dropdown
-    canonical_funds = sec_df[["canonical_id", "canonical_name"]].drop_duplicates()
+    # Only include funds present in exposures
+    exposure_fund_ids = set(df["fund_id"].dropna().unique()) if "fund_id" in df.columns else set()
+    canonical_funds = sec_df[sec_df["canonical_id"].isin(exposure_fund_ids)][["canonical_id", "canonical_name"]].drop_duplicates()
     canonical_funds = canonical_funds.sort_values("canonical_name")
     fund_options = canonical_funds["canonical_name"].tolist()
     default_fund = None
