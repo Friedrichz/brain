@@ -383,6 +383,45 @@ def show_market_view() -> None:
                     value = full_row[col] if col in full_row else row.get(col)
                     st.markdown(value if pd.notna(value) else "_(empty)_")
 
+
+import calendar
+
+def parse_any_date(val):
+    """Parse a date string into a YYYY-MM-DD string, handling many formats."""
+    if pd.isna(val) or not str(val).strip():
+        return None
+    s = str(val).strip()
+    # Try pandas parsing first
+    dt = pd.to_datetime(s, errors="coerce", infer_datetime_format=True)
+    if pd.notna(dt):
+        # If only year/month, set to last day of month
+        if dt.day == 1 and (
+            s.lower().endswith(str(dt.year)) and (
+                s.lower().startswith(dt.strftime("%B").lower()) or
+                s.lower().startswith(dt.strftime("%b").lower()) or
+                "-" in s or "/" in s
+            )
+        ):
+            # Check if original string is just month/year
+            if (
+                len(s.split()) == 2 and
+                not any(char.isdigit() for char in s.split()[0])
+            ) or s.count("-") == 1 or s.count("/") == 1:
+                last_day = calendar.monthrange(dt.year, dt.month)[1]
+                dt = dt.replace(day=last_day)
+        return dt.strftime("%Y-%m-%d")
+    # Try to parse "Month YYYY" or "Mon YYYY"
+    try:
+        dt = pd.to_datetime(s + " 1", errors="coerce")
+        if pd.notna(dt):
+            last_day = calendar.monthrange(dt.year, dt.month)[1]
+            dt = dt.replace(day=last_day)
+            return dt.strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    return None
+
+
 def show_fund_monitor() -> None:
     """Render the fund monitor page using Google Sheets data, using canonical fund list and improved UX."""
 
@@ -424,7 +463,7 @@ def show_fund_monitor() -> None:
 
     # Format the date column homogenously
     if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+        df["date"] = df["date"].apply(parse_any_date)
 
     # Filter exposures by canonical_id (assuming exposures has a 'fund_id' column)
     if "fund_id" in df.columns:
