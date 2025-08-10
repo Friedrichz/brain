@@ -384,13 +384,9 @@ def show_market_view() -> None:
                     st.markdown(value if pd.notna(value) else "_(empty)_")
 
 def show_fund_monitor() -> None:
-    """Render the fund monitor page using Google Sheets data.
+    """Render the fund monitor page using Google Sheets data, using canonical fund list and improved UX."""
 
-    Retrieves the configured exposures sheet, provides selectors for
-    fund name and date, displays key metrics (AUM, net, gross, long,
-    short), counts of long/short positions, and tables of sector and
-    geographical exposures by unpacking dictionary columns.
-    """
+    # Load exposures sheet
     if not ("exposures" in st.secrets and "sheet_id" in st.secrets["exposures"]):
         st.error("Missing 'exposures' configuration in secrets.")
         return
@@ -400,28 +396,63 @@ def show_fund_monitor() -> None:
     if df.empty:
         st.warning("No data returned from the exposures sheet.")
         return
-    # Ensure there is a 'fund_name' column
-    if "fund_name" not in df.columns:
-        st.error("The exposures sheet must contain a 'fund_name' column.")
+
+    # Load securities_master for canonical fund list
+    if not ("securities_master" in st.secrets and "sheet_id" in st.secrets["securities_master"]):
+        st.error("Missing 'securities_master' configuration in secrets.")
         return
-    # Convert date column to datetime for sorting and display
-    if "date" in df.columns:
-        df["date_dt"] = pd.to_datetime(df["date"], errors="coerce")
-    # Fund selection
-    funds = sorted(df["fund_name"].dropna().unique().tolist())
+    sec_sheet_id = st.secrets["securities_master"].get("sheet_id")
+    sec_worksheet = st.secrets["securities_master"].get("worksheet", "Sheet1")
+    sec_df = load_sheet(sec_sheet_id, sec_worksheet)
+    if sec_df.empty or "canonical_id" not in sec_df.columns or "fund_name" not in sec_df.columns:
+        st.warning("No data or missing columns in securities_master.")
+        return
+
+    # Use canonical fund list for dropdown
+    canonical_funds = sec_df[["canonical_id", "fund_name"]].drop_duplicates()
+    canonical_funds = canonical_funds.sort_values("fund_name")
+    fund_options = canonical_funds["fund_name"].tolist()
     default_fund = None
     if "defaults" in st.secrets and "fund" in st.secrets["defaults"]:
         default_fund = st.secrets["defaults"]["fund"]
-    fund_index = funds.index(default_fund) if default_fund in funds else 0
-    fund_choice = st.selectbox("Select Fund", funds, index=fund_index)
-    fund_df = df[df["fund_name"] == fund_choice]
-    # Date selection
+    fund_index = fund_options.index(default_fund) if default_fund in fund_options else 0
+    fund_choice = st.selectbox("Select Fund", fund_options, index=fund_index)
+
+    # Map selected fund_name to canonical_id
+    selected_canonical_id = canonical_funds[canonical_funds["fund_name"] == fund_choice]["canonical_id"].iloc[0]
+
+    # Format the date column homogenously
+    if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+
+    # Filter exposures by canonical_id (assuming exposures has a 'fund_id' column)
+    if "fund_id" in df.columns:
+        fund_df = df[df["fund_id"] == selected_canonical_id]
+    elif "fund_name" in df.columns:
+        fund_df = df[df["fund_name"] == fund_choice]
+    else:
+        st.error("No fund_id or fund_name column in exposures sheet.")
+        return
+
+    # Remove duplicate dates for selection
     if fund_df.empty:
         st.warning("No records found for the selected fund.")
         return
-    date_values = fund_df["date"].dropna().tolist()
+    date_values = sorted(fund_df["date"].dropna().unique().tolist(), reverse=True)
     date_choice = st.selectbox("Select Date", date_values)
-    row = fund_df[fund_df["date"] == date_choice].iloc[0]
+
+    # File type selection
+    file_type = st.selectbox("Select file type", ["pdf", "img"], index=0)
+
+    # Filter by date and file_type (if column exists)
+    filtered_row = fund_df[(fund_df["date"] == date_choice)]
+    if "file_type" in filtered_row.columns:
+        filtered_row = filtered_row[filtered_row["file_type"] == file_type]
+    if filtered_row.empty:
+        st.warning("No records found for the selected date and file type.")
+        return
+    row = filtered_row.iloc[0]
+
     # Display metrics
     metrics_cols = st.columns(5)
     metrics_cols[0].metric("AUM", row.get("aum_fund") or row.get("aum_firm"))
@@ -429,24 +460,57 @@ def show_fund_monitor() -> None:
     metrics_cols[2].metric("Gross", row.get("gross"))
     metrics_cols[3].metric("Long", row.get("long"))
     metrics_cols[4].metric("Short", row.get("short"))
+
     # Positions counts
     st.subheader("Number of Positions")
     pos_cols = st.columns(2)
     pos_cols[0].metric("Long", row.get("num_pos_long"))
     pos_cols[1].metric("Short", row.get("num_pos_short"))
-    # Sector exposures
-    sector_keys = ["sector_long", "sector_short", "sector_gross", "sector_net"]
-    if all(k in row.index for k in sector_keys):
-        st.subheader("Sector Exposures")
-        sector_df = build_exposure_df(row, sector_keys)
-        st.dataframe(sector_df)
-    # Geographic exposures
-    geo_keys = ["geo_long", "geo_short", "geo_gross", "geo_net"]
-    if all(k in row.index for k in geo_keys):
-        st.subheader("Geographical Exposures")
-        geo_df = build_exposure_df(row, geo_keys)
-        st.dataframe(geo_df)
 
+    # Sector and Geographic exposures in the same row
+    sector_keys = ["sector_long", "sector_short", "sector_gross", "sector_net"]
+    geo_keys = ["geo_long", "geo_short", "geo_gross", "geo_net"]
+    st.subheader("Exposures")
+    exp_cols = st.columns(2)
+    if all(k in row.index for k in sector_keys):
+        with exp_cols[0]:
+            st.markdown("**Sector Exposures**")
+            sector_df = build_exposure_df(row, sector_keys)
+            st.dataframe(sector_df)
+    if all(k in row.index for k in geo_keys):
+        with exp_cols[1]:
+            st.markdown("**Geographical Exposures**")
+            geo_df = build_exposure_df(row, geo_keys)
+            st.dataframe(geo_df)
+
+    # --- Historical Analysis Section ---
+    st.subheader("Historical Analysis")
+    # Filter for selected fund and remove duplicate dates
+    hist_df = fund_df.copy()
+    hist_df = hist_df.drop_duplicates(subset=["date"])
+    # Only plot if net and gross columns exist and are numeric
+    if "net" in hist_df.columns and "gross" in hist_df.columns:
+        # Convert to numeric, coerce errors
+        hist_df["net"] = pd.to_numeric(hist_df["net"], errors="coerce")
+        hist_df["gross"] = pd.to_numeric(hist_df["gross"], errors="coerce")
+        hist_df = hist_df.dropna(subset=["date", "net", "gross"])
+        hist_df = hist_df.sort_values("date")
+        if not hist_df.empty:
+            import altair as alt
+            chart = alt.Chart(hist_df).transform_fold(
+                ["net", "gross"],
+                as_=["Exposure", "Value"]
+            ).mark_line(point=True).encode(
+                x=alt.X("date:T", title="Date"),
+                y=alt.Y("Value:Q", title="Exposure"),
+                color=alt.Color("Exposure:N", title="Type"),
+                tooltip=["date", "Exposure", "Value"]
+            ).properties(width=700, height=350)
+            st.altair_chart(chart, use_container_width=True)
+        else:
+            st.info("No historical net/gross data available for this fund.")
+    else:
+        st.info("No historical net/gross data available for this fund.")
 
     
 def main() -> None:
