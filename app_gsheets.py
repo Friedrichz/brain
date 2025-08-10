@@ -422,6 +422,15 @@ def parse_any_date(val):
     return None
 
 
+def percent_to_float(val):
+    try:
+        if pd.isna(val):
+            return None
+        return float(str(val).replace("%", "").strip())
+    except Exception:
+        return None
+
+
 def show_fund_monitor() -> None:
     """Render the fund monitor page using Google Sheets data, using canonical fund list and improved UX."""
 
@@ -533,8 +542,12 @@ def show_fund_monitor() -> None:
         st.write("After dropna:", hist_df[["date", "net", "gross"]].head())
         
         # Convert to numeric, coerce errors
-        hist_df["net"] = pd.to_numeric(hist_df["net"], errors="coerce")
-        hist_df["gross"] = pd.to_numeric(hist_df["gross"], errors="coerce")
+        # Apply to net and gross columns
+        if "net" in hist_df.columns:
+            hist_df["net"] = hist_df["net"].apply(percent_to_float)
+        if "gross" in hist_df.columns:
+            hist_df["gross"] = hist_df["gross"].apply(percent_to_float)
+
         hist_df = hist_df.dropna(subset=["date", "net", "gross"])
         hist_df = hist_df.sort_values("date")
 
