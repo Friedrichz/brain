@@ -236,13 +236,23 @@ def show_performance_view() -> None:
     df = df[df["MTD"].notna() & df["MTD"].astype(str).str.strip().ne("")]
     df = df[df["Fund Name"].notna() & df["Fund Name"].astype(str).str.strip().ne("")]
 
+    # --- Filters in the same row ---
+    col1, col2 = st.columns(2)
     # Asset Class Filter (do not show in table)
     asset_classes = sorted(df["asset_class"].dropna().unique().tolist())
-    selected_asset_classes = st.multiselect(
-        "Filter by Asset Class", asset_classes, default=[]
-    )
+    with col1:
+        selected_asset_classes = st.multiselect(
+            "Filter by Asset Class", asset_classes, default=[]
+        )
     if selected_asset_classes:
         df = df[df["asset_class"].isin(selected_asset_classes)]
+
+    # Fund selector if column exists
+    with col2:
+        fund_options = ["All"] + sorted(df["Fund Name"].dropna().unique().tolist()) if "Fund Name" in df.columns else []
+        fund_choice = st.selectbox("Select Fund", fund_options) if fund_options else "All"
+    if fund_choice != "All":
+        df = df[df["Fund Name"] == fund_choice]
 
     # Hide unwanted columns (including any from the merged table)
     cols_to_hide = [
@@ -274,6 +284,7 @@ def show_performance_view() -> None:
         df_display = df_display.sort_values("As of date", ascending=False)
         # Format date as YYYY-MM-DD
         df_display["As of date"] = df_display["As of date"].dt.strftime("%Y-%m-%d")
+
 
     # Fund selector if column exists
     if "Fund Name" in df_display.columns:
