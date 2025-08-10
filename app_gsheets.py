@@ -199,11 +199,15 @@ import json
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
+
 def fetch_track_record_json(fund_id: str) -> dict:
     """Fetch the track_record.json from Google Drive for the given fund_id inside a parent folder."""
+    
+    DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+
     # Authenticate using service account from Streamlit secrets
     creds_dict = dict(st.secrets["gcp_service_account"])
-    creds = service_account.Credentials.from_service_account_info(creds_dict)
+    creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=DRIVE_SCOPES)
     drive_service = build('drive', 'v3', credentials=creds)
 
     # Get parent folder ID from secrets
