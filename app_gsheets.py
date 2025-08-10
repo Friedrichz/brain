@@ -289,11 +289,8 @@ def show_performance_view() -> None:
 
 
 def show_market_view() -> None:
-    """Render the market views page using Google Sheets data.
+    """Render the market views page using Google Sheets data."""
 
-    Formats the date, hides specified columns, and allows filtering.
-    Clicking a row opens a modal with the row's details.
-    """
     if not ("market_views" in st.secrets and "sheet_id" in st.secrets["market_views"]):
         st.error("Missing 'market_views' configuration in secrets.")
         return
@@ -310,7 +307,8 @@ def show_market_view() -> None:
 
     # Hide unwanted columns
     cols_to_hide = [
-        "Document Type", "Data & Evidence", "Key Themes", "Risks/Uncertainties", "Evidence Strength & Uniqueness",
+        "Document Type", "Data & Evidence", "Key Themes", "Risks/Uncertainties",
+        "Evidence Strength & Uniqueness", "Evidence Strenght & Uniqueness",
         "Follow-up Actions", "Title"
     ]
     df_display = df.drop(columns=[c for c in cols_to_hide if c in df.columns], errors="ignore")
@@ -320,7 +318,6 @@ def show_market_view() -> None:
         "Asset Class & Region", "Date", "Author(s)", "Institution/Source",
         "Market Regime/Context", "Instrument Name"
     ]
-    # Keep only columns that exist, then add the rest
     columns = [col for col in desired_order if col in df_display.columns]
     columns += [col for col in df_display.columns if col not in columns]
     df_display = df_display[columns]
@@ -334,31 +331,19 @@ def show_market_view() -> None:
         if selected:
             filtered = filtered[filtered[col].isin(selected)]
 
-    # Use st.data_editor for row selection
-    selected_idx = st.data_editor(
-        filtered,
-        use_container_width=True,
-        hide_index=True,
-        key="market_views_editor",
-        num_rows="dynamic",
-        column_order=list(filtered.columns),
-        disabled=True,
-        selection_mode="single"
-    )
+    st.dataframe(filtered, use_container_width=True)
 
-    # Show modal if a row is selected
-    if selected_idx and selected_idx["rows"]:
-        idx = selected_idx["rows"][0]
-        row = filtered.iloc[idx]
-        with st.modal("Market View Details", key=f"modal_{idx}"):
-            st.subheader(
-                f"{row.get('Date', '')} | {row.get('Asset Class & Region', '')}"
-            )
-            cols = st.columns(2)
-            for i, col in enumerate(filtered.columns):
-                with cols[i % 2]:
-                    st.markdown(f"**{col}:**")
-                    st.markdown(row[col] if pd.notna(row[col]) else "_(empty)_")
+    # Show details button for each row
+    for idx, row in filtered.iterrows():
+        label = f"Details: {row.get('Date', '')} | {row.get('Asset Class & Region', '')}"
+        if st.button(label, key=f"details_{idx}"):
+            with st.modal("Market View Details", key=f"modal_{idx}"):
+                st.subheader(label)
+                cols = st.columns(2)
+                for i, col in enumerate(filtered.columns):
+                    with cols[i % 2]:
+                        st.markdown(f"**{col}:**")
+                        st.markdown(row[col] if pd.notna(row[col]) else "_(empty)_")
 
 
 def show_fund_monitor() -> None:
