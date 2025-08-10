@@ -285,24 +285,18 @@ def show_performance_view() -> None:
         # Format date as YYYY-MM-DD
         df_display["As of date"] = df_display["As of date"].dt.strftime("%Y-%m-%d")
 
-
-    # Fund selector if column exists
-    if "Fund Name" in df_display.columns:
-        options = ["All"] + sorted(df_display["Fund Name"].dropna().unique().tolist())
-        choice = st.selectbox("Select Fund", options)
-        if choice != "All":
-            df_display = df_display[df_display["Fund Name"] == choice]
-
     st.dataframe(df_display, use_container_width=True)
 
 
 def show_market_view() -> None:
     """Render the market views page using Google Sheets data.
 
-    Retrieves the configured market views sheet, hides the ``Title``
-    column and allows filtering by any remaining column through
-    multi‑select selectors.
+    Retrieves the configured market views sheet, hides specified columns,
+    formats the date, and allows filtering by any remaining column through
+    multi‑select selectors. Each row is clickable to show a popup with details.
     """
+    import streamlit as st
+
     if not ("market_views" in st.secrets and "sheet_id" in st.secrets["market_views"]):
         st.error("Missing 'market_views' configuration in secrets.")
         return
@@ -312,17 +306,40 @@ def show_market_view() -> None:
     if df.empty:
         st.warning("No data returned from the market views sheet.")
         return
-    # Drop Title column if present
-    if "Title" in df.columns:
-        df = df.drop(columns=["Title"])
+
+    # Format the "Date" column
+    if "Date" in df.columns:
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
+
+    # Hide unwanted columns
+    cols_to_hide = [
+        "Document Type", "Data & Evidence", "Key Themes", "Risks/Uncertainties",
+        "Evidence Strenght & Uniqueness", "Follow-up Actions"
+    ]
+    df_display = df.drop(columns=[c for c in cols_to_hide if c in df.columns], errors="ignore")
+
     # Column filter interface
-    filter_columns = st.multiselect("Columns to filter", df.columns.tolist())
-    filtered = df.copy()
+    filter_columns = st.multiselect("Columns to filter", df_display.columns.tolist())
+    filtered = df_display.copy()
     for col in filter_columns:
-        choices = sorted(df[col].dropna().unique().tolist())
+        choices = sorted(df_display[col].dropna().unique().tolist())
         selected = st.multiselect(f"{col}", choices)
         if selected:
             filtered = filtered[filtered[col].isin(selected)]
+
+    # Make each row clickable with a popup
+    st.write("Click a row for details:")
+    for idx, row in filtered.iterrows():
+        label = f"{row.get('Date', '')} | {row.get('Title', '') if 'Title' in row else ''}"
+        if st.button(label, key=f"row_{idx}"):
+            with st.expander(f"Details for {label}", expanded=True):
+                for col in df.columns:
+                    if col in cols_to_hide:
+                        continue
+                    st.markdown(f"**{col}:**")
+                    st.markdown(row[col] if pd.notna(row[col]) else "_(empty)_")
+                    st.markdown("---")
+
     st.dataframe(filtered, use_container_width=True)
 
 
