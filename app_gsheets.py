@@ -221,7 +221,7 @@ def show_performance_view() -> None:
     # Hide unwanted columns
     cols_to_hide = [
         "fund_id", "currency", "WTD", "YTD", "Sender", "Category", "Currency",
-        "Net", "Gross", "Long Exposure", "Correct", "Received"
+        "Net", "Gross", "Long Exposure", "Short Exposure", "Correct", "Received"
     ]
     df_display = df.reset_index(drop=True)
     df_display = df_display.drop(columns=[c for c in cols_to_hide if c in df_display.columns], errors="ignore")
@@ -230,16 +230,23 @@ def show_performance_view() -> None:
     if "Date" in df_display.columns:
         df_display = df_display.rename(columns={"Date": "As of date"})
 
+    # Convert "As of date" to datetime and filter out future dates
+    if "As of date" in df_display.columns:
+        df_display["As of date"] = pd.to_datetime(df_display["As of date"], errors="coerce")
+        today = pd.Timestamp.today().normalize()
+        df_display = df_display[df_display["As of date"] <= today]
+
     # Reorder columns to have "Fund Name" first
     columns = df_display.columns.tolist()
     if "Fund Name" in columns:
         columns.insert(0, columns.pop(columns.index("Fund Name")))
     df_display = df_display[columns]
 
-    # Sort by "As of date" (formerly "Date"), descending
+    # Sort by "As of date" (descending)
     if "As of date" in df_display.columns:
-        df_display["As of date"] = pd.to_datetime(df_display["As of date"], errors="coerce")
         df_display = df_display.sort_values("As of date", ascending=False)
+        # Format date as YYYY-MM-DD
+        df_display["As of date"] = df_display["As of date"].dt.strftime("%Y-%m-%d")
 
     # Fund selector if column exists
     if "Fund Name" in df_display.columns:
