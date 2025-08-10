@@ -364,38 +364,25 @@ def show_market_view() -> None:
         row = selected[0]
         full_row = get_full_row(row)
         with st.expander("Market View Details", expanded=True):
-            st.markdown("### Main Columns")
+            all_columns = list(filtered.columns) + [c for c in cols_to_hide if c in df.columns]
             cols = st.columns(2)
-            for i, col in enumerate(filtered.columns):
+            for i, col in enumerate(all_columns):
                 with cols[i % 2]:
                     st.markdown(f"**{col}:**")
-                    st.markdown(row[col] if pd.notna(row[col]) else "_(empty)_")
-            st.markdown("---")
-            st.markdown("### Additional Details")
-            cols_hidden = st.columns(2)
-            for i, col in enumerate([c for c in cols_to_hide if c in df.columns]):
-                with cols_hidden[i % 2]:
-                    st.markdown(f"**{col}:**")
-                    st.markdown(full_row[col] if pd.notna(full_row[col]) else "_(empty)_")
+                    value = full_row[col] if col in full_row else row.get(col)
+                    st.markdown(value if pd.notna(value) else "_(empty)_")
     elif hasattr(selected, "empty") and not selected.empty:
         row = selected.iloc[0]
         full_row = get_full_row(row)
         with st.expander("Market View Details", expanded=True):
-            st.markdown("### Main Columns")
+            all_columns = list(filtered.columns) + [c for c in cols_to_hide if c in df.columns]
             cols = st.columns(2)
-            for i, col in enumerate(filtered.columns):
+            for i, col in enumerate(all_columns):
                 with cols[i % 2]:
                     st.markdown(f"**{col}:**")
-                    st.markdown(row[col] if pd.notna(row[col]) else "_(empty)_")
-            st.markdown("---")
-            st.markdown("### Additional Details")
-            cols_hidden = st.columns(2)
-            for i, col in enumerate([c for c in cols_to_hide if c in df.columns]):
-                with cols_hidden[i % 2]:
-                    st.markdown(f"**{col}:**")
-                    st.markdown(full_row[col] if pd.notna(full_row[col]) else "_(empty)_")
+                    value = full_row[col] if col in full_row else row.get(col)
+                    st.markdown(value if pd.notna(value) else "_(empty)_")
 
-                    
 def show_fund_monitor() -> None:
     """Render the fund monitor page using Google Sheets data.
 
