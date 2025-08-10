@@ -291,12 +291,9 @@ def show_performance_view() -> None:
 def show_market_view() -> None:
     """Render the market views page using Google Sheets data.
 
-    Retrieves the configured market views sheet, hides specified columns,
-    formats the date, and allows filtering by any remaining column through
-    multi‑select selectors. Each row is clickable to show a popup with details.
+    Formats the date, hides specified columns, and allows filtering.
+    Clicking a row opens a modal with the row's details.
     """
-    import streamlit as st
-
     if not ("market_views" in st.secrets and "sheet_id" in st.secrets["market_views"]):
         st.error("Missing 'market_views' configuration in secrets.")
         return
@@ -313,10 +310,20 @@ def show_market_view() -> None:
 
     # Hide unwanted columns
     cols_to_hide = [
-        "Document Type", "Data & Evidence", "Key Themes", "Risks/Uncertainties",
-        "Evidence Strenght & Uniqueness", "Follow-up Actions"
+        "Document Type", "Data & Evidence", "Key Themes", "Risks/Uncertainties", "Evidence Strength & Uniqueness",
+        "Follow-up Actions", "Title"
     ]
     df_display = df.drop(columns=[c for c in cols_to_hide if c in df.columns], errors="ignore")
+
+    # Reorder columns as requested
+    desired_order = [
+        "Asset Class & Region", "Date", "Author(s)", "Institution/Source",
+        "Market Regime/Context", "Instrument Name"
+    ]
+    # Keep only columns that exist, then add the rest
+    columns = [col for col in desired_order if col in df_display.columns]
+    columns += [col for col in df_display.columns if col not in columns]
+    df_display = df_display[columns]
 
     # Column filter interface
     filter_columns = st.multiselect("Columns to filter", df_display.columns.tolist())
@@ -327,20 +334,31 @@ def show_market_view() -> None:
         if selected:
             filtered = filtered[filtered[col].isin(selected)]
 
-    # Make each row clickable with a popup
-    st.write("Click a row for details:")
-    for idx, row in filtered.iterrows():
-        label = f"{row.get('Date', '')} | {row.get('Title', '') if 'Title' in row else ''}"
-        if st.button(label, key=f"row_{idx}"):
-            with st.expander(f"Details for {label}", expanded=True):
-                for col in df.columns:
-                    if col in cols_to_hide:
-                        continue
+    # Use st.data_editor for row selection
+    selected_idx = st.data_editor(
+        filtered,
+        use_container_width=True,
+        hide_index=True,
+        key="market_views_editor",
+        num_rows="dynamic",
+        column_order=list(filtered.columns),
+        disabled=True,
+        selection_mode="single"
+    )
+
+    # Show modal if a row is selected
+    if selected_idx and selected_idx["rows"]:
+        idx = selected_idx["rows"][0]
+        row = filtered.iloc[idx]
+        with st.modal("Market View Details", key=f"modal_{idx}"):
+            st.subheader(
+                f"{row.get('Date', '')} | {row.get('Asset Class & Region', '')}"
+            )
+            cols = st.columns(2)
+            for i, col in enumerate(filtered.columns):
+                with cols[i % 2]:
                     st.markdown(f"**{col}:**")
                     st.markdown(row[col] if pd.notna(row[col]) else "_(empty)_")
-                    st.markdown("---")
-
-    st.dataframe(filtered, use_container_width=True)
 
 
 def show_fund_monitor() -> None:
