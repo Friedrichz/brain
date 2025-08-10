@@ -404,6 +404,7 @@ def show_fund_monitor() -> None:
     sec_sheet_id = st.secrets["securities_master"].get("sheet_id")
     sec_worksheet = st.secrets["securities_master"].get("worksheet", "Sheet1")
     sec_df = load_sheet(sec_sheet_id, sec_worksheet)
+    st.write("securities_master columns:", sec_df.columns.tolist())
     if sec_df.empty or "canonical_id" not in sec_df.columns or "fund_name" not in sec_df.columns:
         st.warning("No data or missing columns in securities_master.")
         return
