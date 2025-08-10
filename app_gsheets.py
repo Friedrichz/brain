@@ -346,8 +346,16 @@ def show_market_view() -> None:
         fit_columns_on_grid_load=True
     )
     selected = grid_response['selected_rows']
-    if selected and len(selected) > 0:
+    if isinstance(selected, list) and len(selected) > 0:
         row = selected[0]
+        with st.expander("Market View Details", expanded=True):
+            cols = st.columns(2)
+            for i, col in enumerate(filtered.columns):
+                with cols[i % 2]:
+                    st.markdown(f"**{col}:**")
+                    st.markdown(row[col] if pd.notna(row[col]) else "_(empty)_")
+    elif hasattr(selected, "empty") and not selected.empty:
+        row = selected.iloc[0]
         with st.expander("Market View Details", expanded=True):
             cols = st.columns(2)
             for i, col in enumerate(filtered.columns):
