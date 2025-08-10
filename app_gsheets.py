@@ -60,6 +60,7 @@ from typing import Dict, List
 
 import pandas as pd
 import streamlit as st
+from streamlit_option_menu import option_menu
 import gspread
 
 
@@ -324,19 +325,16 @@ def main() -> None:
     """Main entry point for the Streamlit application."""
     st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
 
-    # Sidebar navigation using buttons and session state
-    if "page" not in st.session_state:
-        st.session_state.page = "Performance Overview"
-
-    st.sidebar.title("Navigation")
-    if st.sidebar.button("Performance Overview"):
-        st.session_state.page = "Performance Overview"
-    if st.sidebar.button("Market Views"):
-        st.session_state.page = "Market Views"
-    if st.sidebar.button("Fund Monitor"):
-        st.session_state.page = "Fund Monitor"
-
-    page = st.session_state.page
+    # Sidebar navigation using option_menu
+    with st.sidebar:
+        page = option_menu(
+            "Navigation",
+            ["Performance Overview", "Market Views", "Fund Monitor"],
+            icons=["bar-chart", "globe", "clipboard-data"],  # optional: choose icons
+            menu_icon="cast",  # optional: sidebar header icon
+            default_index=0,
+            orientation="vertical"
+        )
 
     if page == "Performance Overview":
         st.title("Fund Monitoring Dashboard")
