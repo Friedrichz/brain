@@ -354,19 +354,19 @@ def main() -> None:
     with st.sidebar:
         page = option_menu(
             "Navigation",
-            ["Performance Overview", "Market Views", "Fund Monitor"],
+            ["Performance Est", "Market Views", "Fund Monitor"],
             # icons=["bar-chart", "globe", "clipboard-data"],  # optional: choose icons
             # menu_icon="cast",  # optional: sidebar header icon
             default_index=0,
             orientation="vertical"
         )
 
-    if page == "Performance Overview":
-        st.title("Fund Monitoring Dashboard")
+    if page == "Performance Est":
+        # st.title("Fund Monitoring Dashboard")
         st.header("Performance Estimates")
         show_performance_view()
     elif page == "Market Views":
-        st.title("Fund Monitoring Dashboard")
+        # st.title("Fund Monitoring Dashboard")
         st.header("Market Views")
         show_market_view()
     elif page == "Fund Monitor":
