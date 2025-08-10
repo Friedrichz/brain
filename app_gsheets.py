@@ -62,6 +62,7 @@ import pandas as pd
 import streamlit as st
 from streamlit_option_menu import option_menu
 import gspread
+from st_aggrid import AgGrid, GridOptionsBuilder
 
 
 def get_gspread_client() -> gspread.Client:
@@ -289,7 +290,7 @@ def show_performance_view() -> None:
 
 
 def show_market_view() -> None:
-    """Render the market views page using Google Sheets data."""
+    """Render the market views page using Google Sheets data with AgGrid for row selection."""
 
     if not ("market_views" in st.secrets and "sheet_id" in st.secrets["market_views"]):
         st.error("Missing 'market_views' configuration in secrets.")
@@ -308,7 +309,7 @@ def show_market_view() -> None:
     # Hide unwanted columns
     cols_to_hide = [
         "Document Type", "Data & Evidence", "Key Themes", "Risks/Uncertainties",
-        "Evidence Strength & Uniqueness", "Evidence Strenght & Uniqueness",
+        "Risks / Uncertainties", "Evidence Strength & Uniqueness", "Evidence Strenght & Uniqueness",
         "Follow-up Actions", "Title"
     ]
     df_display = df.drop(columns=[c for c in cols_to_hide if c in df.columns], errors="ignore")
@@ -331,114 +332,25 @@ def show_market_view() -> None:
         if selected:
             filtered = filtered[filtered[col].isin(selected)]
 
-    st.dataframe(filtered, use_container_width=True)
-
-    # Show details button for each row
-    for idx, row in filtered.iterrows():
-        label = f"Details: {row.get('Date', '')} | {row.get('Asset Class & Region', '')}"
-        if st.button(label, key=f"details_{idx}"):
-            with st.modal("Market View Details", key=f"modal_{idx}"):
-                st.subheader(label)
-                cols = st.columns(2)
-                for i, col in enumerate(filtered.columns):
-                    with cols[i % 2]:
-                        st.markdown(f"**{col}:**")
-                        st.markdown(row[col] if pd.notna(row[col]) else "_(empty)_")
-
-
-def show_fund_monitor() -> None:
-    """Render the fund monitor page using Google Sheets data.
-
-    Retrieves the configured exposures sheet, provides selectors for
-    fund name and date, displays key metrics (AUM, net, gross, long,
-    short), counts of long/short positions, and tables of sector and
-    geographical exposures by unpacking dictionary columns.
-    """
-    if not ("exposures" in st.secrets and "sheet_id" in st.secrets["exposures"]):
-        st.error("Missing 'exposures' configuration in secrets.")
-        return
-    sheet_id = st.secrets["exposures"].get("sheet_id")
-    worksheet = st.secrets["exposures"].get("worksheet", "Sheet1")
-    df = load_sheet(sheet_id, worksheet)
-    if df.empty:
-        st.warning("No data returned from the exposures sheet.")
-        return
-    # Ensure there is a 'fund_name' column
-    if "fund_name" not in df.columns:
-        st.error("The exposures sheet must contain a 'fund_name' column.")
-        return
-    # Convert date column to datetime for sorting and display
-    if "date" in df.columns:
-        df["date_dt"] = pd.to_datetime(df["date"], errors="coerce")
-    # Fund selection
-    funds = sorted(df["fund_name"].dropna().unique().tolist())
-    default_fund = None
-    if "defaults" in st.secrets and "fund" in st.secrets["defaults"]:
-        default_fund = st.secrets["defaults"]["fund"]
-    fund_index = funds.index(default_fund) if default_fund in funds else 0
-    fund_choice = st.selectbox("Select Fund", funds, index=fund_index)
-    fund_df = df[df["fund_name"] == fund_choice]
-    # Date selection
-    if fund_df.empty:
-        st.warning("No records found for the selected fund.")
-        return
-    date_values = fund_df["date"].dropna().tolist()
-    date_choice = st.selectbox("Select Date", date_values)
-    row = fund_df[fund_df["date"] == date_choice].iloc[0]
-    # Display metrics
-    metrics_cols = st.columns(5)
-    metrics_cols[0].metric("AUM", row.get("aum_fund") or row.get("aum_firm"))
-    metrics_cols[1].metric("Net", row.get("net"))
-    metrics_cols[2].metric("Gross", row.get("gross"))
-    metrics_cols[3].metric("Long", row.get("long"))
-    metrics_cols[4].metric("Short", row.get("short"))
-    # Positions counts
-    st.subheader("Number of Positions")
-    pos_cols = st.columns(2)
-    pos_cols[0].metric("Long", row.get("num_pos_long"))
-    pos_cols[1].metric("Short", row.get("num_pos_short"))
-    # Sector exposures
-    sector_keys = ["sector_long", "sector_short", "sector_gross", "sector_net"]
-    if all(k in row.index for k in sector_keys):
-        st.subheader("Sector Exposures")
-        sector_df = build_exposure_df(row, sector_keys)
-        st.dataframe(sector_df)
-    # Geographic exposures
-    geo_keys = ["geo_long", "geo_short", "geo_gross", "geo_net"]
-    if all(k in row.index for k in geo_keys):
-        st.subheader("Geographical Exposures")
-        geo_df = build_exposure_df(row, geo_keys)
-        st.dataframe(geo_df)
-
-
-def main() -> None:
-    """Main entry point for the Streamlit application."""
-    st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
-
-    # Sidebar navigation using option_menu
-    with st.sidebar:
-        page = option_menu(
-            "Navigation",
-            ["Performance Est", "Market Views", "Fund Monitor"],
-            # icons=["bar-chart", "globe", "clipboard-data"],  # optional: choose icons
-            # menu_icon="cast",  # optional: sidebar header icon
-            default_index=0,
-            orientation="vertical"
-        )
-
-    if page == "Performance Est":
-        # st.title("Fund Monitoring Dashboard")
-        st.header("Performance Estimates")
-        show_performance_view()
-    elif page == "Market Views":
-        # st.title("Fund Monitoring Dashboard")
-        st.header("Market Views")
-        show_market_view()
-    elif page == "Fund Monitor":
-        # st.title("Fund Monitoring Dashboard")
-        st.header("Fund Monitor")
-        show_fund_monitor()
-
-
-if __name__ == "__main__":
-    main()
+    # AGGrid for interactive table and row selection
+    gb = GridOptionsBuilder.from_dataframe(filtered)
+    gb.configure_selection('single', use_checkbox=True)
+    grid_options = gb.build()
+    grid_response = AgGrid(
+        filtered,
+        gridOptions=grid_options,
+        enable_enterprise_modules=False,
+        allow_unsafe_jscode=False,
+        theme="streamlit",
+        update_mode="SELECTION_CHANGED",
+        fit_columns_on_grid_load=True
+    )
+    selected = grid_response['selected_rows']
+    if selected:
+        row = selected[0]
+        with st.expander("Market View Details", expanded=True):
+            cols = st.columns(2)
+            for i, col in enumerate(filtered.columns):
+                with cols[i % 2]:
+                    st.markdown(f"**{col}:**")
+                    st.markdown(row[col] if pd.notna(row[col]) else "_(empty)_")
