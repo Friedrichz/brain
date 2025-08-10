@@ -482,11 +482,6 @@ def show_fund_monitor() -> None:
     # File type selection
     file_type = st.selectbox("Select file type", ["pdf", "img"], index=0)
 
-    st.write("Filtered fund_df:", fund_df)
-    st.write("Unique dates:", fund_df["date"].unique())
-    if "file_type" in fund_df.columns:
-        st.write("Unique file types:", fund_df["file_type"].unique())
-
     # Filter by date and file_type (if column exists)
     filtered_row = fund_df[(fund_df["date"] == date_choice)]
     if "file_type" in filtered_row.columns:
@@ -538,6 +533,10 @@ def show_fund_monitor() -> None:
         hist_df["gross"] = pd.to_numeric(hist_df["gross"], errors="coerce")
         hist_df = hist_df.dropna(subset=["date", "net", "gross"])
         hist_df = hist_df.sort_values("date")
+
+        hist_df = hist_df.dropna(subset=["date", "net", "gross"])
+        st.write("After dropna:", hist_df[["date", "net", "gross"]].head())
+
         if not hist_df.empty:
             import altair as alt
             chart = alt.Chart(hist_df).transform_fold(
