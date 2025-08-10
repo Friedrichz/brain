@@ -306,12 +306,13 @@ def show_market_view() -> None:
     if "Date" in df.columns:
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
 
-    # Hide unwanted columns
+    # Define columns to hide in the main table
     cols_to_hide = [
         "Document Type", "Data & Evidence", "Key Themes", "Risks/Uncertainties",
         "Risks / Uncertainties", "Evidence Strength & Uniqueness", "Evidence Strenght & Uniqueness",
         "Follow-up Actions", "Title"
     ]
+    # Prepare main table
     df_display = df.drop(columns=[c for c in cols_to_hide if c in df.columns], errors="ignore")
 
     # Reorder columns as requested
@@ -348,21 +349,46 @@ def show_market_view() -> None:
     selected = grid_response['selected_rows']
     if isinstance(selected, list) and len(selected) > 0:
         row = selected[0]
+        # Find the original row in df to get hidden columns
+        match = df[
+            (df["Date"] == row.get("Date")) &
+            (df["Asset Class & Region"] == row.get("Asset Class & Region")) &
+            (df["Institution/Source"] == row.get("Institution/Source"))
+        ]
+        if not match.empty:
+            full_row = match.iloc[0]
+        else:
+            full_row = row  # fallback
         with st.expander("Market View Details", expanded=True):
+            st.markdown("### Main Columns")
             cols = st.columns(2)
             for i, col in enumerate(filtered.columns):
                 with cols[i % 2]:
                     st.markdown(f"**{col}:**")
                     st.markdown(row[col] if pd.notna(row[col]) else "_(empty)_")
+            st.markdown("---")
+            st.markdown("### Additional Details")
+            cols_hidden = st.columns(2)
+            for i, col in enumerate([c for c in cols_to_hide if c in df.columns]):
+                with cols_hidden[i % 2]:
+                    st.markdown(f"**{col}:**")
+                    st.markdown(full_row[col] if pd.notna(full_row[col]) else "_(empty)_")
     elif hasattr(selected, "empty") and not selected.empty:
         row = selected.iloc[0]
         with st.expander("Market View Details", expanded=True):
+            st.markdown("### Main Columns")
             cols = st.columns(2)
             for i, col in enumerate(filtered.columns):
                 with cols[i % 2]:
                     st.markdown(f"**{col}:**")
                     st.markdown(row[col] if pd.notna(row[col]) else "_(empty)_")
-
+            st.markdown("---")
+            st.markdown("### Additional Details")
+            cols_hidden = st.columns(2)
+            for i, col in enumerate([c for c in cols_to_hide if c in df.columns]):
+                with cols_hidden[i % 2]:
+                    st.markdown(f"**{col}:**")
+                    st.markdown(row[col] if pd.notna(row[col]) else "_(empty)_")
 
 def show_fund_monitor() -> None:
     """Render the fund monitor page using Google Sheets data.
