@@ -387,7 +387,7 @@ def main() -> None:
     # Sidebar navigation using option_menu
     with st.sidebar:
         page = option_menu(
-            # "Navigation",
+            "Navigation",
             ["Performance Est", "Market Views", "Fund Monitor"],
             # icons=["bar-chart", "globe", "clipboard-data"],  # optional: choose icons
             # menu_icon="cast",  # optional: sidebar header icon
