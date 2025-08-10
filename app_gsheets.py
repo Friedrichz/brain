@@ -405,22 +405,22 @@ def show_fund_monitor() -> None:
     sec_worksheet = st.secrets["securities_master"].get("worksheet", "Sheet1")
     sec_df = load_sheet(sec_sheet_id, sec_worksheet)
     st.write("securities_master columns:", sec_df.columns.tolist())
-    if sec_df.empty or "canonical_id" not in sec_df.columns or "fund_name" not in sec_df.columns:
+    if sec_df.empty or "canonical_id" not in sec_df.columns or "canonical_name" not in sec_df.columns:
         st.warning("No data or missing columns in securities_master.")
         return
 
     # Use canonical fund list for dropdown
-    canonical_funds = sec_df[["canonical_id", "fund_name"]].drop_duplicates()
-    canonical_funds = canonical_funds.sort_values("fund_name")
-    fund_options = canonical_funds["fund_name"].tolist()
+    canonical_funds = sec_df[["canonical_id", "canonical_name"]].drop_duplicates()
+    canonical_funds = canonical_funds.sort_values("canonical_name")
+    fund_options = canonical_funds["canonical_name"].tolist()
     default_fund = None
     if "defaults" in st.secrets and "fund" in st.secrets["defaults"]:
         default_fund = st.secrets["defaults"]["fund"]
     fund_index = fund_options.index(default_fund) if default_fund in fund_options else 0
     fund_choice = st.selectbox("Select Fund", fund_options, index=fund_index)
 
-    # Map selected fund_name to canonical_id
-    selected_canonical_id = canonical_funds[canonical_funds["fund_name"] == fund_choice]["canonical_id"].iloc[0]
+    # Map selected canonical_name to canonical_id
+    selected_canonical_id = canonical_funds[canonical_funds["canonical_name"] == fund_choice]["canonical_id"].iloc[0]
 
     # Format the date column homogenously
     if "date" in df.columns:
@@ -429,10 +429,8 @@ def show_fund_monitor() -> None:
     # Filter exposures by canonical_id (assuming exposures has a 'fund_id' column)
     if "fund_id" in df.columns:
         fund_df = df[df["fund_id"] == selected_canonical_id]
-    elif "fund_name" in df.columns:
-        fund_df = df[df["fund_name"] == fund_choice]
     else:
-        st.error("No fund_id or fund_name column in exposures sheet.")
+        st.error("No fund_id column in exposures sheet.")
         return
 
     # Remove duplicate dates for selection
