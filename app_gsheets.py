@@ -585,6 +585,7 @@ def show_fund_monitor() -> None:
 
     # --- Historical Analysis Section ---
     st.subheader("Historical Analysis")
+    st.write("Looking for Google Drive folder with fund_id:", selected_canonical_id)
     # Fetch and display historical returns
     track_record = fetch_track_record_json(selected_canonical_id)
     if track_record and "returns" in track_record:
