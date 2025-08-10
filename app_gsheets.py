@@ -207,22 +207,33 @@ def show_performance_view() -> None:
     if df.empty:
         st.warning("No data returned from the performance sheet.")
         return
+
     # Drop duplicates by Fund Name, Share Class, Currency and Date
     dedup_columns = [c for c in ["Fund Name", "Share Class", "Currency", "Date"] if c in df.columns]
     if dedup_columns:
         df = df.drop_duplicates(subset=dedup_columns, keep="last")
-    # Hide specific columns if present
-    cols_to_hide = [
-        "Received", "Sender", "Category", "Net", "Gross",
-        "Long Exposure", "Short Exposure", "Correct",
-    ]
-    df_display = df.drop(columns=[c for c in cols_to_hide if c in df.columns])
+
+    # Filter out rows with empty "Date" or "MTD" columns
+    df = df[df["Date"].notna() & df["Date"].astype(str).str.strip().ne("")]
+    df = df[df["MTD"].notna() & df["MTD"].astype(str).str.strip().ne("")]
+
+    # Hide the first column (index), fund_id, currency, WTD, YTD
+    cols_to_hide = ["fund_id", "currency", "WTD", "YTD"]
+    # Remove index by resetting and dropping it
+    df_display = df.reset_index(drop=True)
+    df_display = df_display.drop(columns=[c for c in cols_to_hide if c in df_display.columns], errors="ignore")
+
+    # Rename "Date" column to "As of date"
+    if "Date" in df_display.columns:
+        df_display = df_display.rename(columns={"Date": "As of date"})
+
     # Fund selector if column exists
     if "Fund Name" in df_display.columns:
         options = ["All"] + sorted(df_display["Fund Name"].dropna().unique().tolist())
         choice = st.selectbox("Select Fund", options)
         if choice != "All":
             df_display = df_display[df_display["Fund Name"] == choice]
+
     st.dataframe(df_display, use_container_width=True)
 
 
@@ -323,22 +334,22 @@ def show_fund_monitor() -> None:
 
 def main() -> None:
     """Main entry point for the Streamlit application."""
-    st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
+    # st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
 
     # Sidebar navigation using option_menu
     with st.sidebar:
         page = option_menu(
             "Navigation",
             ["Performance Overview", "Market Views", "Fund Monitor"],
-            icons=["bar-chart", "globe", "clipboard-data"],  # optional: choose icons
-            menu_icon="cast",  # optional: sidebar header icon
+            # icons=["bar-chart", "globe", "clipboard-data"],  # optional: choose icons
+            # menu_icon="cast",  # optional: sidebar header icon
             default_index=0,
             orientation="vertical"
         )
 
     if page == "Performance Overview":
         st.title("Fund Monitoring Dashboard")
-        st.header("Performance Overview")
+        st.header("Performance Estimates")
         show_performance_view()
     elif page == "Market Views":
         st.title("Fund Monitoring Dashboard")
