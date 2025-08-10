@@ -5,3 +5,4 @@ openpyxl>=3.1.0
 gspread
 streamlit-option-menu
 streamlit-aggrid
+altair

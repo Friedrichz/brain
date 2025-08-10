@@ -560,7 +560,7 @@ def show_fund_monitor() -> None:
                 x=alt.X("date:T", title="Date"),
                 y=alt.Y("Value:Q", title="Exposure"),
                 color=alt.Color("Exposure:N", title="Type"),
-                tooltip=["date", "Exposure", "Value"]
+                tooltip=["date", alt.Tooltip("Exposure:N"), alt.Tooltip("Value:Q")]
             ).properties(width=700, height=350)
             st.altair_chart(chart, use_container_width=True)
         else:
