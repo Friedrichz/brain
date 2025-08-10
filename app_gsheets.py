@@ -443,6 +443,11 @@ def show_fund_monitor() -> None:
     # File type selection
     file_type = st.selectbox("Select file type", ["pdf", "img"], index=0)
 
+    st.write("Filtered fund_df:", fund_df)
+    st.write("Unique dates:", fund_df["date"].unique())
+    if "file_type" in fund_df.columns:
+        st.write("Unique file types:", fund_df["file_type"].unique())
+
     # Filter by date and file_type (if column exists)
     filtered_row = fund_df[(fund_df["date"] == date_choice)]
     if "file_type" in filtered_row.columns:
