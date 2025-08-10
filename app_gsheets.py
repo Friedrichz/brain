@@ -514,37 +514,24 @@ def show_fund_monitor() -> None:
     if "defaults" in st.secrets and "fund" in st.secrets["defaults"]:
         default_fund = st.secrets["defaults"]["fund"]
     fund_index = fund_options.index(default_fund) if default_fund in fund_options else 0
-    fund_choice = st.selectbox("Select Fund", fund_options, index=fund_index)
 
     # --- Selection boxes in two columns ---
     sel_col1, sel_col2 = st.columns(2)
     with sel_col1:
-        fund_choice = st.selectbox("Select Fund", fund_options, index=fund_index)
+        fund_choice = st.selectbox("Select Fund", fund_options, index=fund_index, key="fund_select")
     # Map selected canonical_name to canonical_id
     selected_canonical_id = canonical_funds[canonical_funds["canonical_name"] == fund_choice]["canonical_id"].iloc[0]
-
-    # Format the date column homogenously
-    if "date" in df.columns:
-        df["date"] = df["date"].apply(parse_any_date)
-
-    # Filter exposures by canonical_id (assuming exposures has a 'fund_id' column)
-    if "fund_id" in df.columns:
-        fund_df = df[df["fund_id"] == selected_canonical_id]
-    else:
-        st.error("No fund_id column in exposures sheet.")
-        return
 
     # Remove duplicate dates for selection
     if fund_df.empty:
         st.warning("No records found for the selected fund.")
         return
     date_values = sorted(fund_df["date"].dropna().unique().tolist(), reverse=True)
-    date_choice = st.selectbox("Select Date", date_values)
 
     with sel_col2:
-        date_choice = st.selectbox("Select Date", date_values)
-        file_type = st.selectbox("Select file type", ["pdf", "img"], index=0)
-
+        date_choice = st.selectbox("Select Date", date_values, key="date_select")
+        file_type = st.selectbox("Select file type", ["pdf", "img"], index=0, key="filetype_select")
+    
     # Filter by date and file_type (if column exists)
     filtered_row = fund_df[(fund_df["date"] == date_choice)]
     if "file_type" in filtered_row.columns:
