@@ -64,6 +64,10 @@ from streamlit_option_menu import option_menu
 import gspread
 from st_aggrid import AgGrid, GridOptionsBuilder
 
+import json
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+
 
 def get_gspread_client() -> gspread.Client:
     """Return an authenticated gspread client.
@@ -190,6 +194,51 @@ def build_exposure_df(row: pd.Series, prefixes: List[str]) -> pd.DataFrame:
         parts.append(df)
     return pd.concat(parts, axis=1)
 
+
+import json
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+
+def fetch_track_record_json(fund_id: str) -> dict:
+    """Fetch the track_record.json from Google Drive for the given fund_id."""
+    # Authenticate using service account from Streamlit secrets
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    creds = service_account.Credentials.from_service_account_info(creds_dict)
+    drive_service = build('drive', 'v3', credentials=creds)
+
+    # Search for the folder with the fund_id as its name
+    folder_query = f"name = '{fund_id}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    folder_results = drive_service.files().list(q=folder_query, fields="files(id, name)").execute()
+    folders = folder_results.get('files', [])
+    if not folders:
+        st.warning(f"No Google Drive folder found for fund_id: {fund_id}")
+        return None
+    folder_id = folders[0]['id']
+
+    # Search for track_record.json in the folder
+    file_query = f"'{folder_id}' in parents and name = 'track_record.json' and trashed = false"
+    file_results = drive_service.files().list(q=file_query, fields="files(id, name)").execute()
+    files = file_results.get('files', [])
+    if not files:
+        st.warning(f"No track_record.json found in folder for fund_id: {fund_id}")
+        return None
+    file_id = files[0]['id']
+
+    # Download the file content
+    request = drive_service.files().get_media(fileId=file_id)
+    from io import BytesIO
+    from googleapiclient.http import MediaIoBaseDownload
+    fh = BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+    fh.seek(0)
+    try:
+        return json.load(fh)
+    except Exception as e:
+        st.error(f"Failed to parse track_record.json: {e}")
+        return None
 
 def show_performance_view() -> None:
     """Render the performance overview page using Google Sheets data, with asset class filter."""
@@ -467,6 +516,10 @@ def show_fund_monitor() -> None:
     fund_index = fund_options.index(default_fund) if default_fund in fund_options else 0
     fund_choice = st.selectbox("Select Fund", fund_options, index=fund_index)
 
+    # --- Selection boxes in two columns ---
+    sel_col1, sel_col2 = st.columns(2)
+    with sel_col1:
+        fund_choice = st.selectbox("Select Fund", fund_options, index=fund_index)
     # Map selected canonical_name to canonical_id
     selected_canonical_id = canonical_funds[canonical_funds["canonical_name"] == fund_choice]["canonical_id"].iloc[0]
 
@@ -488,8 +541,9 @@ def show_fund_monitor() -> None:
     date_values = sorted(fund_df["date"].dropna().unique().tolist(), reverse=True)
     date_choice = st.selectbox("Select Date", date_values)
 
-    # File type selection
-    file_type = st.selectbox("Select file type", ["pdf", "img"], index=0)
+    with sel_col2:
+        date_choice = st.selectbox("Select Date", date_values)
+        file_type = st.selectbox("Select file type", ["pdf", "img"], index=0)
 
     # Filter by date and file_type (if column exists)
     filtered_row = fund_df[(fund_df["date"] == date_choice)]
@@ -532,6 +586,29 @@ def show_fund_monitor() -> None:
 
     # --- Historical Analysis Section ---
     st.subheader("Historical Analysis")
+    # Fetch and display historical returns
+    track_record = fetch_track_record_json(selected_canonical_id)
+    if track_record and "returns" in track_record:
+        returns_df = pd.DataFrame(track_record["returns"])
+        # Expecting columns like 'date' and 'return'
+        if "date" in returns_df.columns and "return" in returns_df.columns:
+            returns_df["date"] = returns_df["date"].apply(parse_any_date)
+            returns_df = returns_df.dropna(subset=["date", "return"])
+            returns_df["return"] = pd.to_numeric(returns_df["return"], errors="coerce")
+            returns_df = returns_df.dropna(subset=["return"])
+            returns_df = returns_df.sort_values("date")
+            import altair as alt
+            ret_chart = alt.Chart(returns_df).mark_line(point=True).encode(
+                x=alt.X("date:T", title="Date"),
+                y=alt.Y("return:Q", title="Return"),
+                tooltip=["date", "return"]
+            ).properties(width=700, height=350)
+            st.altair_chart(ret_chart, use_container_width=True)
+        else:
+            st.info("track_record.json does not contain expected columns.")
+    elif track_record:
+        st.info("No returns data found in track_record.json.")
+
     # Filter for selected fund and remove duplicate dates
     hist_df = fund_df.copy()
     hist_df = hist_df.drop_duplicates(subset=["date"])
@@ -539,7 +616,6 @@ def show_fund_monitor() -> None:
     if "net" in hist_df.columns and "gross" in hist_df.columns:
         
         hist_df = hist_df.dropna(subset=["date", "net", "gross"])
-        st.write("After dropna:", hist_df[["date", "net", "gross"]].head())
         
         # Convert to numeric, coerce errors
         # Apply to net and gross columns

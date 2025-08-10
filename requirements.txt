@@ -6,3 +6,6 @@ gspread
 streamlit-option-menu
 streamlit-aggrid
 altair
+json
+google
+googleapiclient
