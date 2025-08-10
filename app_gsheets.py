@@ -528,14 +528,15 @@ def show_fund_monitor() -> None:
     hist_df = hist_df.drop_duplicates(subset=["date"])
     # Only plot if net and gross columns exist and are numeric
     if "net" in hist_df.columns and "gross" in hist_df.columns:
+        
+        hist_df = hist_df.dropna(subset=["date", "net", "gross"])
+        st.write("After dropna:", hist_df[["date", "net", "gross"]].head())
+        
         # Convert to numeric, coerce errors
         hist_df["net"] = pd.to_numeric(hist_df["net"], errors="coerce")
         hist_df["gross"] = pd.to_numeric(hist_df["gross"], errors="coerce")
         hist_df = hist_df.dropna(subset=["date", "net", "gross"])
         hist_df = hist_df.sort_values("date")
-
-        hist_df = hist_df.dropna(subset=["date", "net", "gross"])
-        st.write("After dropna:", hist_df[["date", "net", "gross"]].head())
 
         if not hist_df.empty:
             import altair as alt
