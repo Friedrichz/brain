@@ -346,7 +346,7 @@ def show_market_view() -> None:
         fit_columns_on_grid_load=True
     )
     selected = grid_response['selected_rows']
-    if selected:
+    if selected and len(selected) > 0:
         row = selected[0]
         with st.expander("Market View Details", expanded=True):
             cols = st.columns(2)
