@@ -213,19 +213,33 @@ def show_performance_view() -> None:
     if dedup_columns:
         df = df.drop_duplicates(subset=dedup_columns, keep="last")
 
-    # Filter out rows with empty "Date" or "MTD" columns
+    # Filter out rows with empty "Date", "MTD", or "Fund Name" columns
     df = df[df["Date"].notna() & df["Date"].astype(str).str.strip().ne("")]
     df = df[df["MTD"].notna() & df["MTD"].astype(str).str.strip().ne("")]
+    df = df[df["Fund Name"].notna() & df["Fund Name"].astype(str).str.strip().ne("")]
 
-    # Hide the first column (index), fund_id, currency, WTD, YTD
-    cols_to_hide = ["fund_id", "currency", "WTD", "YTD"]
-    # Remove index by resetting and dropping it
+    # Hide unwanted columns
+    cols_to_hide = [
+        "fund_id", "currency", "WTD", "YTD", "Sender", "Category", "Currency",
+        "Net", "Gross", "Long Exposure", "Correct", "Received"
+    ]
     df_display = df.reset_index(drop=True)
     df_display = df_display.drop(columns=[c for c in cols_to_hide if c in df_display.columns], errors="ignore")
 
     # Rename "Date" column to "As of date"
     if "Date" in df_display.columns:
         df_display = df_display.rename(columns={"Date": "As of date"})
+
+    # Reorder columns to have "Fund Name" first
+    columns = df_display.columns.tolist()
+    if "Fund Name" in columns:
+        columns.insert(0, columns.pop(columns.index("Fund Name")))
+    df_display = df_display[columns]
+
+    # Sort by "As of date" (formerly "Date"), descending
+    if "As of date" in df_display.columns:
+        df_display["As of date"] = pd.to_datetime(df_display["As of date"], errors="coerce")
+        df_display = df_display.sort_values("As of date", ascending=False)
 
     # Fund selector if column exists
     if "Fund Name" in df_display.columns:
