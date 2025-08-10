@@ -323,10 +323,21 @@ def show_fund_monitor() -> None:
 def main() -> None:
     """Main entry point for the Streamlit application."""
     st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
-    page = st.sidebar.radio(
-        "Views",
-        ["Performance Overview", "Market Views", "Fund Monitor"],
-    )
+
+    # Sidebar navigation using buttons and session state
+    if "page" not in st.session_state:
+        st.session_state.page = "Performance Overview"
+
+    st.sidebar.title("Navigation")
+    if st.sidebar.button("Performance Overview"):
+        st.session_state.page = "Performance Overview"
+    if st.sidebar.button("Market Views"):
+        st.session_state.page = "Market Views"
+    if st.sidebar.button("Fund Monitor"):
+        st.session_state.page = "Fund Monitor"
+
+    page = st.session_state.page
+
     if page == "Performance Overview":
         st.title("Fund Monitoring Dashboard")
         st.header("Performance Overview")
