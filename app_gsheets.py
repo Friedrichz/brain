@@ -347,18 +347,22 @@ def show_market_view() -> None:
         fit_columns_on_grid_load=True
     )
     selected = grid_response['selected_rows']
+
+    # Robust row matching for details
+    def get_full_row(row):
+        # Try to match on all available columns used in the table
+        mask = pd.Series([True] * len(df))
+        for key in ["Date", "Asset Class & Region", "Institution/Source"]:
+            if key in df.columns and key in row:
+                mask &= (df[key] == row.get(key))
+        matches = df[mask]
+        if not matches.empty:
+            return matches.iloc[0]
+        return row  # fallback
+
     if isinstance(selected, list) and len(selected) > 0:
         row = selected[0]
-        # Find the original row in df to get hidden columns
-        match = df[
-            (df["Date"] == row.get("Date")) &
-            (df["Asset Class & Region"] == row.get("Asset Class & Region")) &
-            (df["Institution/Source"] == row.get("Institution/Source"))
-        ]
-        if not match.empty:
-            full_row = match.iloc[0]
-        else:
-            full_row = row  # fallback
+        full_row = get_full_row(row)
         with st.expander("Market View Details", expanded=True):
             st.markdown("### Main Columns")
             cols = st.columns(2)
@@ -375,6 +379,7 @@ def show_market_view() -> None:
                     st.markdown(full_row[col] if pd.notna(full_row[col]) else "_(empty)_")
     elif hasattr(selected, "empty") and not selected.empty:
         row = selected.iloc[0]
+        full_row = get_full_row(row)
         with st.expander("Market View Details", expanded=True):
             st.markdown("### Main Columns")
             cols = st.columns(2)
@@ -388,8 +393,9 @@ def show_market_view() -> None:
             for i, col in enumerate([c for c in cols_to_hide if c in df.columns]):
                 with cols_hidden[i % 2]:
                     st.markdown(f"**{col}:**")
-                    st.markdown(row[col] if pd.notna(row[col]) else "_(empty)_")
+                    st.markdown(full_row[col] if pd.notna(full_row[col]) else "_(empty)_")
 
+                    
 def show_fund_monitor() -> None:
     """Render the fund monitor page using Google Sheets data.
 
