@@ -519,25 +519,46 @@ def show_fund_monitor() -> None:
 
 # 1) Monthly Seasonality Explorer
 def _fetch_history(ticker: str, start: str = "1928-01-01") -> pd.DataFrame:
-    # Use yfinance, auto-adjusted closes; keep column names compatible with existing code
+    # Use yfinance, auto-adjusted closes
     df = yf.download(ticker, start=start, auto_adjust=True, progress=False)
     if df is None or df.empty:
         raise ValueError(f"No data returned for {ticker}")
-    df = df.reset_index().rename(columns={"Date": "date"})
-    # Lowercase columns to match downstream expectations
+
+    # Make a real 'date' column no matter how the index is named
+    df = df.reset_index()
+    if "Date" in df.columns:
+        df = df.rename(columns={"Date": "date"})
+    elif "index" in df.columns:
+        df = df.rename(columns={"index": "date"})
+    else:
+        # fallback: pick the first datetime-like column or synthesize from the (now integer) index
+        dt_cols = [c for c in df.columns if np.issubdtype(df[c].dtype, np.datetime64)]
+        if dt_cols:
+            df = df.rename(columns={dt_cols[0]: "date"})
+        else:
+            df.insert(0, "date", pd.to_datetime(df.index))
+
+    # lower-case columns; guarantee 'adj close'
     df.columns = [str(c).lower() for c in df.columns]
-    # Provide 'adj close' alias expected by seasonality/memory/stress views
-    if "adj close" not in df.columns and "close" in df.columns:
-        df["adj close"] = df["close"]
+    if "adj close" not in df.columns:
+        if "close" in df.columns:
+            df["adj close"] = df["close"]
+        elif "adjclose" in df.columns:
+            df["adj close"] = df["adjclose"]
+
+    # ensure datetime dtype
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
     return df
 
 
 def _seasonality_stats(df: pd.DataFrame) -> pd.DataFrame:
     px = df.copy()
-    # ensure required columns
     if "adj close" not in px.columns and "close" in px.columns:
         px["adj close"] = px["close"]
+    if "date" not in px.columns:
+        raise ValueError("History frame missing 'date' after fetch.")
     px["date"] = pd.to_datetime(px["date"], errors="coerce")
+    px = px.dropna(subset=["date"])
 
     px["ret"] = px["adj close"].pct_change()
     px["year"] = px["date"].dt.year
@@ -776,7 +797,7 @@ def view_market_stress():
     hy["date"] = pd.to_datetime(hy["date"], errors="coerce")
     curve["date"] = pd.to_datetime(curve["date"], errors="coerce")
     spy["date"] = pd.to_datetime(spy["date"], errors="coerce")
-    
+
     # Merge
     df = vix.merge(hy, on="date", how="outer").merge(curve, on="date", how="outer").merge(spy, on="date", how="outer").sort_values("date")
     df = df.ffill().dropna()
