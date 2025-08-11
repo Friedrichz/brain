@@ -31,7 +31,10 @@ from st_aggrid import AgGrid, GridOptionsBuilder
 # New: markets/fetching libs
 import yfinance as yf
 from pandas_datareader import data as pdr
-yf.pdr_override()
+from yfinance import pdr_override
+
+pdr_override()
+
 
 # Google auth pieces (existing)
 from google.oauth2 import service_account
