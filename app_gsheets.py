@@ -575,13 +575,19 @@ def _seasonality_stats(df: pd.DataFrame) -> pd.DataFrame:
     stats["hit_rate_pct"] = stats["hit_rate"] * 100
     return stats
 
-def view_monthly_seasonality():
+# Replace the whole function
+def view_monthly_seasonality(ticker_override: str | None = None, start_year_override: int | None = None):
     st.subheader("Monthly Seasonality Explorer")
-    tcol1, tcol2 = st.columns([2,1])
-    with tcol1:
-        ticker = st.text_input("Ticker (Yahoo Finance)", value="SPY")
-    with tcol2:
-        start_year = st.number_input("Start Year", min_value=1900, max_value=datetime.now().year, value=1990)
+    if ticker_override is None or start_year_override is None:
+        tcol1, tcol2 = st.columns([2,1])
+        with tcol1:
+            ticker = st.text_input("Ticker (Yahoo Finance)", value="SPY", key="seas_ticker")
+        with tcol2:
+            start_year = st.number_input("Start Year", min_value=1900, max_value=datetime.now().year, value=1990, key="seas_start")
+    else:
+        ticker = ticker_override
+        start_year = start_year_override
+
     if not ticker:
         return
     df = _fetch_history(ticker, start=f"{start_year}-01-01")
@@ -599,6 +605,7 @@ def view_monthly_seasonality():
     st.altair_chart(bars, use_container_width=True)
     st.altair_chart(line, use_container_width=True)
     st.caption("Method: monthly total return by year → median by month; hit rate = share of years with positive month.")
+
 
 # 2) Market Memory Explorer
 def _ytd_path(df: pd.DataFrame) -> pd.DataFrame:
@@ -626,15 +633,23 @@ def _closest_years(cur: pd.Series, hist: pd.DataFrame, k: int=5) -> List[int]:
     res = [y for y,_ in ranked if y != datetime.now().year][:k]
     return res
 
-def view_market_memory():
+# Replace the whole function
+def view_market_memory(ticker_override: str | None = None, start_year_override: int | None = None, k_override: int | None = None):
     st.subheader("Market Memory Explorer")
-    l, r = st.columns([2,1])
-    with l:
-        ticker = st.text_input("Ticker (Yahoo Finance)", value="SPY")
-    with r:
-        start_year = st.number_input("History start year", min_value=1900, max_value=datetime.now().year, value=1950)
-        k = st.slider("Similar years", min_value=3, max_value=10, value=5)
+    if ticker_override is None or start_year_override is None or k_override is None:
+        l, r = st.columns([2,1])
+        with l:
+            ticker = st.text_input("Ticker (Yahoo Finance)", value="SPY", key="mm_ticker")
+        with r:
+            start_year = st.number_input("History start year", min_value=1900, max_value=datetime.now().year, value=1950, key="mm_start")
+            k = st.slider("Similar years", min_value=3, max_value=10, value=5, key="mm_k")
+    else:
+        ticker = ticker_override
+        start_year = start_year_override
+        k = k_override
 
+    if not ticker:
+        return
     df = _fetch_history(ticker, start=f"{start_year}-01-01")
     px = df.copy()
     if "adj close" not in px.columns and "close" in px.columns:
@@ -643,13 +658,11 @@ def view_market_memory():
     px["date"] = pd.to_datetime(px["date"], errors="coerce")
     px["doy"] = px["date"].dt.dayofyear
     px["year"] = px["date"].dt.year
-    # per-year cumulative, not across whole history
     px["cum"] = (1.0 + px["ret"]).groupby(px["year"]).cumprod() - 1.0
 
     this_year = px[px["year"] == datetime.now().year].set_index("doy")["cum"]
     hist = _ytd_path(df)
 
-    # nearest years by Euclidean distance on overlapping DOYs
     pivot = hist.pivot(index="doy", columns="year", values="cum")
     common = pivot.index[pivot.index.isin(this_year.index)]
     diffs = {
@@ -667,6 +680,7 @@ def view_market_memory():
         x="doy:Q", y="cum:Q", color="year:N"
     )
     st.altair_chart(others + base, use_container_width=True)
+
 
 # 3) Breakout Scanner
 def _rolling_high(s: pd.Series, n: int) -> pd.Series:
@@ -829,33 +843,27 @@ def view_market_stress():
     st.caption("Composite blends VIX, HY OAS (FRED), 10y–2y curve (FRED), and SPY drawdown into a 0–100 scale.")
 
 # Router for Market Analytics
+# Replace the whole function
 def show_market_analytics():
     st.header("Market Analytics")
-    tab = st.sidebar.radio(
-        "Market Analytics",
-        [
-            "Monthly Seasonality Explorer",
-            "Market Memory Explorer",
-            "Breakout Scanner",
-            "10-Year Nominal & Real Yield Dashboard",
-            "Liquidity & Fed Policy Tracker",
-            "Market Stress Composite",
-        ],
-        index=0,
-        key="market_analytics_tab"
-    )
-    if tab == "Monthly Seasonality Explorer":
-        view_monthly_seasonality()
-    elif tab == "Market Memory Explorer":
-        view_market_memory()
-    elif tab == "Breakout Scanner":
-        view_breakout_scanner()
-    elif tab == "10-Year Nominal & Real Yield Dashboard":
-        view_real_yield_dashboard()
-    elif tab == "Liquidity & Fed Policy Tracker":
-        view_liquidity_tracker()
-    elif tab == "Market Stress Composite":
-        view_market_stress()
+
+    # Shared controls for BOTH views
+    c1, c2, c3 = st.columns([2,1,1])
+    with c1:
+        ticker = st.text_input("Ticker (Yahoo Finance)", value="SPY", key="ma_ticker")
+    with c2:
+        start_year = st.number_input("Start Year", min_value=1900, max_value=datetime.now().year, value=1990, key="ma_start")
+    with c3:
+        k = st.slider("Similar years (for Market Memory)", min_value=3, max_value=10, value=5, key="ma_k")
+
+    if not ticker:
+        return
+
+    # Render both views on the same page with the same security
+    view_monthly_seasonality(ticker_override=ticker, start_year_override=start_year)
+    st.markdown("---")
+    view_market_memory(ticker_override=ticker, start_year_override=start_year, k_override=k)
+
 
 # ---- Main ----
 
