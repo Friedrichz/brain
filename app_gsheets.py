@@ -270,72 +270,371 @@ def show_performance_view() -> None:
         df_display["MTD"] = df_display["MTD"].astype(str).fillna("")
     st.dataframe(df_display, use_container_width=True)
 
-def show_market_view() -> None:
-    # Preserved logic with AgGrid selection:contentReference[oaicite:4]{index=4}
-    if not ("market_views" in st.secrets and "sheet_id" in st.secrets["market_views"]):
-        st.error("Missing 'market_views' configuration in secrets.")
-        return
-    sheet_id = st.secrets["market_views"].get("sheet_id")
-    worksheet = st.secrets["market_views"].get("worksheet", "Sheet1")
+
+# ======== NEW HELPERS FOR "MARKET VIEWS" ========
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def _load_letters() -> pd.DataFrame:
+    """
+    Load 'fund letters' from Google Sheets as configured in st.secrets["fund_letters"].
+    Expected keys: sheet_id, worksheet. Returns a DataFrame (may be empty).
+    """
+    if not ("fund_letters" in st.secrets and "sheet_id" in st.secrets["fund_letters"]):
+        st.error("Missing 'fund_letters' configuration in secrets.")
+        return pd.DataFrame()
+    sheet_id = st.secrets["fund_letters"]["sheet_id"]
+    worksheet = st.secrets["fund_letters"].get("worksheet", "Sheet1")
     df = load_sheet(sheet_id, worksheet)
-    if df.empty:
-        st.warning("No data returned from the market views sheet.")
+    return df
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def _load_fund_master() -> pd.DataFrame:
+    """
+    Load securities master to map fund_id -> fund name.
+    Expects columns: canonical_id, canonical_name.
+    """
+    if not ("securities_master" in st.secrets and "sheet_id" in st.secrets["securities_master"]):
+        st.error("Missing 'securities_master' configuration in secrets.")
+        return pd.DataFrame()
+    sec_sheet_id = st.secrets["securities_master"]["sheet_id"]
+    sec_worksheet = st.secrets["securities_master"].get("worksheet", "Sheet1")
+    sec_df = load_sheet(sec_sheet_id, sec_worksheet)
+    needed = {"canonical_id", "canonical_name"}
+    if sec_df.empty or not needed.issubset(sec_df.columns):
+        st.warning("securities_master missing required columns: canonical_id, canonical_name")
+        return pd.DataFrame()
+    return sec_df[["canonical_id", "canonical_name"]].drop_duplicates()
+
+def _map_fund_names(df: pd.DataFrame, fund_id_col: str = "fund_id") -> pd.DataFrame:
+    """
+    Append 'fund_name' by joining letters.df[fund_id] -> securities_master.canonical_name
+    """
+    master = _load_fund_master()
+    if df.empty or master.empty or fund_id_col not in df.columns:
+        df = df.copy()
+        df["fund_name"] = df.get(fund_id_col, "")
+        return df
+    out = df.merge(master, left_on=fund_id_col, right_on="canonical_id", how="left")
+    out["fund_name"] = out["canonical_name"].fillna(out[fund_id_col].astype(str))
+    return out.drop(columns=["canonical_id", "canonical_name"], errors="ignore")
+
+def _nonnull_mask(s: pd.Series) -> pd.Series:
+    return s.astype(str).str.strip().ne("") & s.notna()
+
+def _parse_report_date(df: pd.DataFrame, col: str = "report_date") -> pd.DataFrame:
+    if col in df.columns:
+        df = df.copy()
+        df[col] = pd.to_datetime(df[col], errors="coerce")
+    return df
+
+@st.cache_data(show_spinner=False, ttl=900)
+def _yahoo_history_panel(tickers: list[str], lookback_days: int = 400) -> pd.DataFrame:
+    """
+    Fetch adjusted close for the set of tickers for ~400 calendar days.
+    Returns tidy frame: columns [date, ticker, adj_close]
+    """
+    if not tickers:
+        return pd.DataFrame(columns=["date", "ticker", "adj_close"])
+    tickers = sorted({t.strip().upper() for t in tickers if t and isinstance(t, str)})
+    if not tickers:
+        return pd.DataFrame(columns=["date", "ticker", "adj_close"])
+    end = pd.Timestamp.today().normalize() + pd.Timedelta(days=1)
+    start = end - pd.Timedelta(days=lookback_days)
+    px = yf.download(tickers=tickers, start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"),
+                     auto_adjust=True, progress=False, group_by="ticker", threads=True)
+    # Normalize to tidy
+    frames = []
+    if isinstance(px.columns, pd.MultiIndex):
+        for t in tickers:
+            if (t, "Adj Close") in px.columns:
+                sub = px[(t, "Adj Close")].dropna().to_frame("adj_close")
+            elif (t, "Close") in px.columns:
+                sub = px[(t, "Close")].dropna().to_frame("adj_close")
+            else:
+                continue
+            sub = sub.reset_index().rename(columns={"Date": "date"})
+            sub["ticker"] = t
+            frames.append(sub)
+    else:
+        # single-ticker case
+        col = "Adj Close" if "Adj Close" in px.columns else ("Close" if "Close" in px.columns else None)
+        if col is not None:
+            sub = px[[col]].dropna().rename(columns={col: "adj_close"}).reset_index().rename(columns={"Date": "date"})
+            sub["ticker"] = tickers[0]
+            frames.append(sub)
+    if not frames:
+        return pd.DataFrame(columns=["date", "ticker", "adj_close"])
+    out = pd.concat(frames, axis=0, ignore_index=True)
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out = out.dropna(subset=["date"]).sort_values(["ticker", "date"])
+    return out
+
+def _return_slice(px: pd.DataFrame, when: str) -> pd.Series:
+    """
+    Compute percentage changes per ticker for the given horizon.
+    when in {"1d","1w","mtd","ytd"}.
+    """
+    if px.empty:
+        return pd.Series(dtype=float)
+    today = pd.Timestamp.today().normalize()
+    # last valid close per ticker
+    last_px = px.groupby("ticker")["adj_close"].last()
+    if when == "1d":
+        prev = px.groupby("ticker")["adj_close"].nth(-2)
+        return ((last_px / prev) - 1.0) * 100.0
+    if when == "1w":
+        # 5 trading days ~ 7 calendar days; nth(-6) guards short series
+        prev = px.groupby("ticker")["adj_close"].nth(-6)
+        return ((last_px / prev) - 1.0) * 100.0
+    if when == "mtd":
+        month_start = today.replace(day=1)
+        ref = px[px["date"] <= today].copy()
+        ref = ref.merge(
+            ref.groupby("ticker")["date"].apply(lambda s: s[s >= month_start].min()).rename("anchor"),
+            on="ticker", how="left"
+        )
+        ref = ref[ref["date"] == ref["anchor"]]
+        ref_px = ref.set_index("ticker")["adj_close"]
+        return ((last_px / ref_px) - 1.0) * 100.0
+    if when == "ytd":
+        year_start = today.replace(month=1, day=1)
+        ref = px[px["date"] <= today].copy()
+        ref = ref.merge(
+            ref.groupby("ticker")["date"].apply(lambda s: s[s >= year_start].min()).rename("anchor"),
+            on="ticker", how="left"
+        )
+        ref = ref[ref["date"] == ref["anchor"]]
+        ref_px = ref.set_index("ticker")["adj_close"]
+        return ((last_px / ref_px) - 1.0) * 100.0
+    return pd.Series(dtype=float)
+
+def _attach_return_columns(df: pd.DataFrame, ticker_col: str = "position_ticker") -> pd.DataFrame:
+    """
+    Adds 1d %, 1w %, MTD %, YTD % based on Yahoo data for unique tickers in df[ticker_col].
+    """
+    if df.empty or ticker_col not in df.columns:
+        for c in ["1d %","1w %","MTD %","YTD %"]:
+            df[c] = None
+        return df
+    tickers = [t for t in df[ticker_col].astype(str).str.upper().tolist() if t and t != "NAN"]
+    px = _yahoo_history_panel(tickers)
+    if px.empty:
+        for c in ["1d %","1w %","MTD %","YTD %"]:
+            df[c] = None
+        return df
+    r1d = _return_slice(px, "1d")
+    r1w = _return_slice(px, "1w")
+    rmtd = _return_slice(px, "mtd")
+    rytd = _return_slice(px, "ytd")
+    out = df.copy()
+    def _map(series, ticker):
+        try:
+            return round(float(series.get(str(ticker).upper())), 2)
+        except Exception:
+            return None
+    out["1d %"]  = out[ticker_col].apply(lambda t: _map(r1d, t))
+    out["1w %"]  = out[ticker_col].apply(lambda t: _map(r1w, t))
+    out["MTD %"] = out[ticker_col].apply(lambda t: _map(rmtd, t))
+    out["YTD %"] = out[ticker_col].apply(lambda t: _map(rytd, t))
+    return out
+
+# ======== REPLACE show_market_view WITH THIS ========
+
+def show_market_view() -> None:
+    st.header("Market Views")
+
+    letters = _load_letters()
+    if letters.empty:
+        st.warning("Letters table is empty or unavailable.")
         return
-    if "Date" in df.columns:
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
-    cols_to_hide = [
-        "Document Type","Data & Evidence","Key Themes","Risks/Uncertainties",
-        "Risks / Uncertainties","Evidence Strength & Uniqueness","Evidence Strenght & Uniqueness",
-        "Follow-up Actions","Title"
-    ]
-    df_display = df.drop(columns=[c for c in cols_to_hide if c in df.columns], errors="ignore")
-    desired_order = ["Asset Class & Region","Date","Author(s)","Institution/Source","Market Regime/Context","Instrument Name"]
-    columns = [c for c in desired_order if c in df_display.columns]
-    columns += [c for c in df_display.columns if c not in columns]
-    df_display = df_display[columns]
+    letters = _parse_report_date(letters, "report_date")
+    letters = _map_fund_names(letters, fund_id_col="fund_id")
 
-    filter_columns = st.multiselect("Columns to filter", df_display.columns.tolist())
-    filtered = df_display.copy()
-    for col in filter_columns:
-        choices = sorted(df_display[col].dropna().unique().tolist())
-        selected = st.multiselect(f"{col}", choices)
-        if selected:
-            filtered = filtered[filtered[col].isin(selected)]
-    gb = GridOptionsBuilder.from_dataframe(filtered)
-    gb.configure_selection('single', use_checkbox=True)
-    grid_options = gb.build()
-    grid_response = AgGrid(
-        filtered,
-        gridOptions=grid_options,
-        enable_enterprise_modules=False,
-        allow_unsafe_jscode=False,
-        theme="streamlit",
-        update_mode="SELECTION_CHANGED",
-        fit_columns_on_grid_load=True
-    )
-    selected = grid_response['selected_rows']
+    # Tabs for the three requested views + the legacy explorer retained at the end
+    tabs = st.tabs([
+        "Fund Manager Insights",
+        "Latest Fund Positions",
+        "Fund Manager Investment Thesis",
+        "Source Explorer"
+    ])
 
-    def get_full_row(row):
-        mask = pd.Series([True] * len(df))
-        for key in ["Date","Asset Class & Region","Institution/Source"]:
-            if key in df.columns and key in row:
-                mask &= (df[key] == row.get(key))
-        matches = df[mask]
-        if not matches.empty:
-            return matches.iloc[0]
-        return row
+    # 1) Fund Manager Insights
+    with tabs[0]:
+        df = letters.copy()
+        need = ["macro_view_category","fund_name","report_date","macro_view_summary","macro_view_direction","consistency"]
+        # filter where macro_view_category not empty
+        if "macro_view_category" not in df.columns:
+            st.warning("Column 'macro_view_category' not found in letters.")
+            df = pd.DataFrame(columns=need)
+        else:
+            df = df[_nonnull_mask(df["macro_view_category"])]
+            # Select/rename
+            rename_map = {
+                "macro_view_category": "Macro Category",
+                "fund_name": "Fund Name",
+                "report_date": "Report Date",
+                "macro_view_summary": "Macro View Summary",
+                "macro_view_direction": "Macro View Direction",
+                "consistency": "Consistency",
+            }
+            # Ensure columns exist
+            for c in ["macro_view_summary","macro_view_direction","consistency"]:
+                if c not in df.columns:
+                    df[c] = None
+            df = df[["macro_view_category","fund_name","report_date","macro_view_summary","macro_view_direction","consistency"]]
+            df = df.rename(columns=rename_map).sort_values("Report Date", ascending=False)
+        st.dataframe(df, use_container_width=True)
 
-    if isinstance(selected, list) and len(selected) > 0:
-        row = selected[0]
-        full_row = get_full_row(row)
-        with st.expander("Market View Details", expanded=True):
-            all_columns = list(filtered.columns) + [c for c in cols_to_hide if c in df.columns]
-            cols = st.columns(2)
-            for i, col in enumerate(all_columns):
-                with cols[i % 2]:
-                    st.markdown(f"**{col}:**")
-                    value = full_row[col] if col in full_row else row.get(col)
-                    st.markdown(value if pd.notna(value) else "_(empty)_")
+    # 2) Latest Fund Positions
+    with tabs[1]:
+        df = letters.copy()
+        # filter where position_ticker and position_weight_percent not empty
+        for col in ["position_ticker","position_weight_percent"]:
+            if col not in df.columns:
+                df[col] = None
+        mask = _nonnull_mask(df["position_ticker"]) & _nonnull_mask(df["position_weight_percent"])
+        df = df[mask]
+        if df.empty:
+            st.info("No rows with non-empty position_ticker and position_weight_percent.")
+        else:
+            df = _parse_report_date(df, "report_date")
+            # keep latest report_date per fund
+            latest = df.groupby("fund_name")["report_date"].transform("max")
+            df = df[df["report_date"] == latest]
+            # required columns
+            for col in ["position_name","position_sector"]:
+                if col not in df.columns:
+                    df[col] = None
+            view = df[[
+                "fund_name","position_name","position_ticker","position_sector","position_weight_percent","report_date"
+            ]].copy()
+            view = view.rename(columns={
+                "fund_name":"Fund Name",
+                "position_name":"Position Name",
+                "position_ticker":"Position Ticker",
+                "position_sector":"Position Sector",
+                "position_weight_percent":"Position Weight (%)",
+                "report_date":"Report Date"
+            }).sort_values(["Fund Name","Position Weight (%)"], ascending=[True, False])
+
+            # Attach 1d/1w/MTD/YTD for each ticker
+            metrics = view.rename(columns={"Position Ticker": "position_ticker"})
+            metrics = _attach_return_columns(metrics, ticker_col="position_ticker")
+            # bring back display names
+            metrics = metrics.rename(columns={"position_ticker": "Position Ticker"})
+            # reorder with metrics at end
+            ordered_cols = [
+                "Fund Name","Position Name","Position Ticker","Position Sector","Position Weight (%)","Report Date",
+                "1d %","1w %","MTD %","YTD %"
+            ]
+            metrics = metrics[ordered_cols]
+            st.dataframe(metrics, use_container_width=True)
+
+    # 3) Fund Manager Investment Thesis
+    with tabs[2]:
+        df = letters.copy()
+        for col in ["position_thesis_summary","position_ticker"]:
+            if col not in df.columns:
+                df[col] = None
+        mask = _nonnull_mask(df["position_thesis_summary"]) & _nonnull_mask(df["position_ticker"])
+        df = df[mask]
+        # ensure supporting columns exist
+        for col in ["position_name","position_sector","position_duration_view"]:
+            if col not in df.columns:
+                df[col] = None
+        view = df[[
+            "fund_name","report_date","position_name","position_ticker","position_sector","position_thesis_summary","position_duration_view"
+        ]].copy()
+        view = view.rename(columns={
+            "fund_name":"Fund Name",
+            "report_date":"Report Date",
+            "position_name":"Position Name",
+            "position_ticker":"Position Ticker",
+            "position_sector":"Position Sector",
+            "position_thesis_summary":"Position Thesis Summary",
+            "position_duration_view":"Position Duration View"
+        })
+        # attach return columns
+        metrics = view.rename(columns={"Position Ticker":"position_ticker"})
+        metrics = _attach_return_columns(metrics, ticker_col="position_ticker").rename(columns={"position_ticker":"Position Ticker"})
+        # order by report_date
+        metrics = metrics.sort_values("Report Date", ascending=False)
+        # column order
+        ordered_cols = [
+            "Fund Name","Report Date","Position Name","Position Ticker","Position Sector",
+            "Position Thesis Summary","Position Duration View","1d %","1w %","MTD %","YTD %"
+        ]
+        metrics = metrics[ordered_cols]
+        st.dataframe(metrics, use_container_width=True)
+
+    # 4) Legacy “Source Explorer” preserved from original Market Views
+    with tabs[3]:
+        # existing implementation preserved
+        if not ("market_views" in st.secrets and "sheet_id" in st.secrets["market_views"]):
+            st.error("Missing 'market_views' configuration in secrets.")
+            return
+        sheet_id = st.secrets["market_views"].get("sheet_id")
+        worksheet = st.secrets["market_views"].get("worksheet", "Sheet1")
+        df_mv = load_sheet(sheet_id, worksheet)
+        if df_mv.empty:
+            st.warning("No data returned from the market views sheet.")
+            return
+        if "Date" in df_mv.columns:
+            df_mv["Date"] = pd.to_datetime(df_mv["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
+        cols_to_hide = [
+            "Document Type","Data & Evidence","Key Themes","Risks/Uncertainties",
+            "Risks / Uncertainties","Evidence Strength & Uniqueness","Evidence Strenght & Uniqueness",
+            "Follow-up Actions","Title"
+        ]
+        df_display = df_mv.drop(columns=[c for c in cols_to_hide if c in df_mv.columns], errors="ignore")
+        desired_order = ["Asset Class & Region","Date","Author(s)","Institution/Source","Market Regime/Context","Instrument Name"]
+        columns = [c for c in desired_order if c in df_display.columns]
+        columns += [c for c in df_display.columns if c not in columns]
+        df_display = df_display[columns]
+
+        filter_columns = st.multiselect("Columns to filter", df_display.columns.tolist(), key="mv_filters")
+        filtered = df_display.copy()
+        for col in filter_columns:
+            choices = sorted(df_display[col].dropna().unique().tolist())
+            selected = st.multiselect(f"{col}", choices, key=f"mv_{col}")
+            if selected:
+                filtered = filtered[filtered[col].isin(selected)]
+        gb = GridOptionsBuilder.from_dataframe(filtered)
+        gb.configure_selection('single', use_checkbox=True)
+        grid_options = gb.build()
+        grid_response = AgGrid(
+            filtered,
+            gridOptions=grid_options,
+            enable_enterprise_modules=False,
+            allow_unsafe_jscode=False,
+            theme="streamlit",
+            update_mode="SELECTION_CHANGED",
+            fit_columns_on_grid_load=True
+        )
+        selected = grid_response['selected_rows']
+
+        def get_full_row(row):
+            mask = pd.Series([True] * len(df_mv))
+            for key in ["Date","Asset Class & Region","Institution/Source"]:
+                if key in df_mv.columns and key in row:
+                    mask &= (df_mv[key] == row.get(key))
+            matches = df_mv[mask]
+            if not matches.empty:
+                return matches.iloc[0]
+            return row
+
+        if isinstance(selected, list) and len(selected) > 0:
+            row = selected[0]
+            full_row = get_full_row(row)
+            with st.expander("Market View Details", expanded=True):
+                all_columns = list(filtered.columns) + [c for c in cols_to_hide if c in df_mv.columns]
+                cols = st.columns(2)
+                for i, col in enumerate(all_columns):
+                    with cols[i % 2]:
+                        st.markdown(f"**{col}:**")
+                        value = full_row[col] if col in full_row else row.get(col)
+                        st.markdown(value if pd.notna(value) else "_(empty)_")
+
 
 # --- Shared utilities (existing + minor helpers) ---
 def parse_any_date(val):
