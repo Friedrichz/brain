@@ -593,6 +593,9 @@ def show_market_view() -> None:
     letters = _map_fund_names(letters, fund_id_col="fund_id")
 
     # ── Row 1 ─────────────────────────────────────────────────────────────
+    st.write("## Fund Positions and Investment Thesis")
+    st.write("Latest manager portfolio positions and investment thesis extracted from fund letters, factsheets.")
+
     top_tabs = st.tabs([
         "Fund Positions",
         "Investment Thesis",
@@ -637,7 +640,7 @@ def show_market_view() -> None:
                 "Fund Name","Position Name","Position Ticker","Position Sector",
                 "Position Weight (%)","Report Date","MTD %","YTD %"
             ]
-            metrics = metrics[ordered_cols]
+            metrics = metrics[ordered_cols].sort_values(["MTD %"], ascending=[False])
 
             st.dataframe(
                 metrics,
@@ -650,7 +653,6 @@ def show_market_view() -> None:
                     "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
                 },
             )
-
 
     with top_tabs[1]:
         df = letters.copy()
@@ -702,7 +704,7 @@ def show_market_view() -> None:
         metrics = metrics.sort_values("Report Date", ascending=False)
         ordered_cols = [
             "Fund Name","Report Date","Position Name","Position Ticker","Position Sector",
-            "Position Thesis Summary","Position Duration View","Since Report %","MTD %","YTD %"
+            "Position Thesis Summary","Since Report %","MTD %","YTD %","Position Duration View",
         ]
         metrics = metrics[ordered_cols]
 
@@ -720,6 +722,9 @@ def show_market_view() -> None:
 
     
     # ── Row 2 ─────────────────────────────────────────────────────────────
+    st.write("## Market Views")
+    st.write("Latest manager insights extracted from fund letters, factsheets and external research communications")
+
     bottom_tabs = st.tabs([
         "Fund Insights",
         "External Research"
