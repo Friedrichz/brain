@@ -519,31 +519,37 @@ def show_fund_monitor() -> None:
 
 # 1) Monthly Seasonality Explorer
 def _fetch_history(ticker: str, start: str = "1928-01-01") -> pd.DataFrame:
-    # Pull price history with auto‑adjusted closes
     df = yf.download(ticker, start=start, auto_adjust=True, progress=False)
-    st.write(df.head())  # Debugging line to show fetched data
     if df is None or df.empty:
         raise ValueError(f"No data returned for {ticker}")
 
-    # Reset the index to convert the datetime index into a column
+    # If yfinance returned MultiIndex columns (e.g., single ticker under a second level),
+    # collapse to a single set of OHLCV columns.
+    if isinstance(df.columns, pd.MultiIndex):
+        lvl1 = df.columns.get_level_values(1)
+        if isinstance(ticker, str) and ticker in set(lvl1):
+            df = df.xs(ticker, axis=1, level=1)
+        else:
+            # fallback to the first symbol present
+            first = next(iter(dict.fromkeys(lvl1)))  # preserves order
+            df = df.xs(first, axis=1, level=1)
+
+    # Ensure there is a concrete 'date' column
+    df.index = pd.to_datetime(df.index, errors="coerce")
+    df.index.name = "date"
     df = df.reset_index()
 
-    # Rename whichever column now holds the dates to 'date'
-    # The first column after reset_index() is the date; it may be 'Date' or 'index'
-    date_col = df.columns[0]
-    df = df.rename(columns={date_col: "date"})
-
-    # Lower-case all column names for consistency
+    # Normalize headers
     df.columns = [str(c).lower() for c in df.columns]
 
-    # Guarantee an 'adj close' column even if only 'close' or 'adjclose' is returned
+    # Guarantee 'adj close'
     if "adj close" not in df.columns:
         if "close" in df.columns:
             df["adj close"] = df["close"]
         elif "adjclose" in df.columns:
             df["adj close"] = df["adjclose"]
 
-    # Ensure the 'date' column is datetime
+    # Final type assurance
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     return df
 
