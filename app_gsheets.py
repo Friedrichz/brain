@@ -521,6 +521,7 @@ def show_fund_monitor() -> None:
 def _fetch_history(ticker: str, start: str = "1928-01-01") -> pd.DataFrame:
     # Pull price history with auto‑adjusted closes
     df = yf.download(ticker, start=start, auto_adjust=True, progress=False)
+    st.write(df.head())  # Debugging line to show fetched data
     if df is None or df.empty:
         raise ValueError(f"No data returned for {ticker}")
 
