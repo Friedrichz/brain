@@ -1035,56 +1035,128 @@ def show_fund_monitor() -> None:
             st.dataframe(_format_exposure_table(geo_df), use_container_width=True)
 
     st.subheader("Historical Analysis")
-    st.write("Cumulative Performance")
-    track_record = fetch_track_record_json(selected_canonical_id)
-    if track_record and isinstance(track_record.get("returns"), list):
-        returns_df = pd.DataFrame(track_record["returns"])
-        if "date" not in returns_df.columns or "return" not in returns_df.columns:
-            if "ret" in returns_df.columns and "date" in returns_df.columns:
-                returns_df = returns_df.rename(columns={"ret":"return"})
-            elif "value" in returns_df.columns and "date" in returns_df.columns:
-                returns_df = returns_df.rename(columns={"value":"return"})
-        if {"date","return"} <= set(returns_df.columns):
-            returns_df["date"] = returns_df["date"].apply(parse_any_date)
-            returns_df = returns_df.dropna(subset=["date","return"])
-            returns_df["return"] = pd.to_numeric(returns_df["return"], errors="coerce")
-            returns_df = returns_df.dropna(subset=["return"]).sort_values("date")
+    h1, h2 = st.columns(2, vertical_alignment="top")
+    with h1:
+        st.write("Cumulative Performance")
+        track_record = fetch_track_record_json(selected_canonical_id)
+        if track_record and isinstance(track_record.get("returns"), list):
+            returns_df = pd.DataFrame(track_record["returns"])
+            if "date" not in returns_df.columns or "return" not in returns_df.columns:
+                if "ret" in returns_df.columns and "date" in returns_df.columns:
+                    returns_df = returns_df.rename(columns={"ret":"return"})
+                elif "value" in returns_df.columns and "date" in returns_df.columns:
+                    returns_df = returns_df.rename(columns={"value":"return"})
+            if {"date","return"} <= set(returns_df.columns):
+                returns_df["date"] = returns_df["date"].apply(parse_any_date)
+                returns_df = returns_df.dropna(subset=["date","return"])
+                returns_df["return"] = pd.to_numeric(returns_df["return"], errors="coerce")
+                returns_df = returns_df.dropna(subset=["return"]).sort_values("date")
 
-            import altair as alt
-            returns_df["ret_dec"] = returns_df["return"] / 100.0
-            returns_df["cum_return"] = (1.0 + returns_df["ret_dec"]).cumprod() - 1.0
-            cum_chart = alt.Chart(returns_df).mark_line(point=True).encode(
-                x=alt.X("date:T", title="Date"),
-                y=alt.Y("cum_return:Q", title="Cumulative Return", axis=alt.Axis(format="%")),
-                tooltip=[alt.Tooltip("date:T", title="Date"),
-                         alt.Tooltip("return:Q", title="Monthly Return", format=".2f"),
-                         alt.Tooltip("cum_return:Q", title="Cumulative", format=".2%")]
-            ).properties(width=700, height=350)
-            st.altair_chart(cum_chart, use_container_width=True)
-
-    st.write("Net & Gross Exposure")
-    hist_df = fund_df.copy().drop_duplicates(subset=["date"])
-    if "net" in hist_df.columns and "gross" in hist_df.columns:
-        hist_df = hist_df.dropna(subset=["date","net","gross"])
-        if "net" in hist_df.columns:
-            hist_df["net"] = hist_df["net"].apply(percent_to_float)
-        if "gross" in hist_df.columns:
-            hist_df["gross"] = hist_df["gross"].apply(percent_to_float)
-        hist_df = hist_df.dropna(subset=["date","net","gross"]).sort_values("date")
-        if not hist_df.empty:
-            import altair as alt
-            chart = alt.Chart(hist_df).transform_fold(
-                ["net","gross"],
-                as_=["Exposure","Value"]
-            ).mark_line(point=True).encode(
-                x=alt.X("date:T", title="Date"),
-                y=alt.Y("Value:Q", title="Exposure"),
-                color=alt.Color("Exposure:N", title="Type"),
-                tooltip=["date", alt.Tooltip("Exposure:N"), alt.Tooltip("Value:Q")]
-            ).properties(width=700, height=350)
-            st.altair_chart(chart, use_container_width=True)
+                import altair as alt
+                returns_df["ret_dec"] = returns_df["return"] / 100.0
+                returns_df["cum_return"] = (1.0 + returns_df["ret_dec"]).cumprod() - 1.0
+                cum_chart = alt.Chart(returns_df).mark_line(point=True).encode(
+                    x=alt.X("date:T", title="Date"),
+                    y=alt.Y("cum_return:Q", title="Cumulative Return", axis=alt.Axis(format="%")),
+                    tooltip=[alt.Tooltip("date:T", title="Date"),
+                            alt.Tooltip("return:Q", title="Monthly Return", format=".2f"),
+                            alt.Tooltip("cum_return:Q", title="Cumulative", format=".2%")]
+                ).properties(width=700, height=350)
+                st.altair_chart(cum_chart, use_container_width=True)
     
-    st.subheader("Meeting Notes")
+    with h2:
+        st.write("Net & Gross Exposure")
+        hist_df = fund_df.copy().drop_duplicates(subset=["date"])
+        if "net" in hist_df.columns and "gross" in hist_df.columns:
+            hist_df = hist_df.dropna(subset=["date","net","gross"])
+            if "net" in hist_df.columns:
+                hist_df["net"] = hist_df["net"].apply(percent_to_float)
+            if "gross" in hist_df.columns:
+                hist_df["gross"] = hist_df["gross"].apply(percent_to_float)
+            hist_df = hist_df.dropna(subset=["date","net","gross"]).sort_values("date")
+            if not hist_df.empty:
+                import altair as alt
+                chart = alt.Chart(hist_df).transform_fold(
+                    ["net","gross"],
+                    as_=["Exposure","Value"]
+                ).mark_line(point=True).encode(
+                    x=alt.X("date:T", title="Date"),
+                    y=alt.Y("Value:Q", title="Exposure"),
+                    color=alt.Color("Exposure:N", title="Type"),
+                    tooltip=["date", alt.Tooltip("Exposure:N"), alt.Tooltip("Value:Q")]
+                ).properties(width=700, height=350)
+                st.altair_chart(chart, use_container_width=True)
+    
+    c1, c2 = st.columns(2, vertical_alignment="top")
+    with c1:
+        st.subheader("Fund Positions & Performance")
+        try:
+            letters = _load_letters()
+        except Exception:
+            letters = pd.DataFrame()
+
+        if (
+            letters.empty
+            or not {"fund_id", "report_date", "position_ticker", "position_weight_percent"} <= set(letters.columns)
+        ):
+            st.info("No positions available.")
+        else:
+            df = letters[letters["fund_id"] == selected_canonical_id].copy()
+            # keep rows with valid tickers and weights
+            mask = _nonnull_mask(df["position_ticker"]) & _nonnull_mask(df["position_weight_percent"])
+            df = df[mask].copy()
+            df["report_date"] = pd.to_datetime(df["report_date"], errors="coerce")
+
+            if df.empty or df["report_date"].dropna().empty:
+                st.info("No positions available.")
+            else:
+                latest_rd = df["report_date"].max()
+                df = df[df["report_date"] == latest_rd].copy()
+
+                # ensure optional columns exist
+                for c in ["position_name", "position_sector"]:
+                    if c not in df.columns:
+                        df[c] = None
+
+                view = df[[
+                    "position_name", "position_ticker", "position_sector",
+                    "position_weight_percent", "report_date"
+                ]].rename(columns={
+                    "position_name": "Position Name",
+                    "position_ticker": "Position Ticker",
+                    "position_sector": "Position Sector",
+                    "position_weight_percent": "Position Weight (%)",
+                    "report_date": "Report Date",
+                })
+
+                # attach MTD/YTD performance using existing helper (MTD/YTD only version)
+                metrics = view.rename(columns={"Position Ticker": "position_ticker"}).copy()
+                metrics = _attach_return_columns(metrics, ticker_col="position_ticker")
+                metrics = metrics.rename(columns={"position_ticker": "Position Ticker"})
+
+                # order by weight desc
+                metrics = metrics.sort_values("Position Weight (%)", ascending=False)
+
+                # final column order (no Fund Name)
+                metrics = metrics[[
+                    "Position Name", "Position Ticker", "Position Sector",
+                    "Position Weight (%)", "Report Date", "MTD %", "YTD %"
+                ]]
+
+                st.dataframe(
+                    metrics,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Report Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD", step="day"),
+                        "Position Weight (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                        "MTD %": st.column_config.NumberColumn(format="%.2f%%"),
+                        "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
+                    },
+                )
+
+    with c2:
+        st.subheader("Meeting Notes")
 
 # =========================
 # Market Analytics Section
