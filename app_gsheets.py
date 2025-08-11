@@ -268,7 +268,7 @@ def show_performance_view() -> None:
         df_display["As of date"] = df_display["As of date"].dt.strftime("%Y-%m-%d")
     if "MTD" in df_display.columns:
         df_display["MTD"] = df_display["MTD"].astype(str).fillna("")
-    st.dataframe(df_display, use_container_width=True)
+    st.dataframe(df_display, use_container_width=True, hide_index=True)
 
 
 # ======== NEW HELPERS FOR "MARKET VIEWS" ========
@@ -1462,6 +1462,8 @@ def main() -> None:
         )
     if page == "Performance Est":
         st.header("Performance Estimates")
+        st.write("Performance estimates sent by hedge funds to investment.coverage@brightside-capital.com.")
+        st.write("Automation and data extraction from emails using n8n and ChatGPT API.")
         show_performance_view()
     elif page == "Market Views":
         # st.header("Market Views")
