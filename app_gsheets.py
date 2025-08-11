@@ -210,14 +210,19 @@ def _drive_client():
     return build('drive', 'v3', credentials=creds)
 
 def _download_json_from_drive(file_id: str):
-    """Download a Drive file (Docs or regular) and return parsed JSON object."""
+    """Download a Drive file (Docs or regular) and return parsed JSON object (robust to BOM/headers)."""
     svc = _drive_client()
     try:
-        meta = svc.files().get(fileId=file_id, fields="id,name,mimeType", supportsAllDrives=True).execute()
+        meta = svc.files().get(
+            fileId=file_id,
+            fields="id,name,mimeType",
+            supportsAllDrives=True
+        ).execute()
         mime = meta["mimeType"]
-        # Google Docs need export; regular files use media
+
+        # Google Docs need export; regular files use media download
         if mime.startswith("application/vnd.google-apps"):
-            # Export as plain text; JSON in Docs is stored as text
+            # Export as plain text; JSON stored as text in Docs
             resp = svc.files().export(fileId=file_id, mimeType="text/plain").execute()
             raw = resp if isinstance(resp, bytes) else resp.encode("utf-8", errors="ignore")
         else:
@@ -230,14 +235,30 @@ def _download_json_from_drive(file_id: str):
             while not done:
                 _, done = downloader.next_chunk()
             raw = fh.getvalue()
-        # Decode robustly (handles UTF‑8 BOM)
-        text = raw.decode("utf-8-sig", errors="replace").strip()
-        if not text:
-            raise ValueError("Empty file content")
+
+        # ---- Robust decode & JSON extraction ----
+        # 1) Decode (handle BOM/zero-width chars), then strip outer whitespace
+        text = raw.decode("utf-8", errors="ignore").replace("\ufeff", "").strip()
+
+        # 2) If Drive added any preamble/blank lines, cut to first JSON token
+        first_brace = text.find("{")
+        first_bracket = text.find("[")
+        candidates = [i for i in (first_brace, first_bracket) if i != -1]
+        if candidates:
+            start = min(candidates)
+            if start > 0:
+                text = text[start:]
+
+        # 3) Validate and parse
+        if not text or text[0] not in "{[":
+            raise ValueError("Empty or non‑JSON content from Drive file")
+
         return json.loads(text)
+
     except (HttpError, ValueError, json.JSONDecodeError) as e:
         st.error(f"Failed to parse track_record.json: {e}")
         return None
+
 
 def _normalize_track_record(obj):
     """Return a dict with `returns` = list of {date, return} from various JSON shapes."""
