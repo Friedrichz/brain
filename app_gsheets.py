@@ -866,6 +866,32 @@ def percent_to_float(val):
     except Exception:
         return None
 
+# ADD near other helpers (below percent_to_float)
+
+def _split_bullets(text: str) -> list[str]:
+    s = ("" if text is None else str(text)).strip()
+    if not s:
+        return []
+    parts = [p.strip("•- \t") for p in s.splitlines() if p.strip()]
+    if len(parts) <= 1 and "•" in s:
+        parts = [p.strip("•- \t") for p in s.split("•") if p.strip()]
+    return [p for p in parts if p]
+
+def _format_exposure_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
+    out = df.copy()
+    # a) strip quotes from index labels
+    out.index = out.index.astype(str).str.  strip().str.strip('"').str.strip("'")
+    # b) coerce to numeric for percent formatting
+    for c in out.columns:
+        out[c] = pd.to_numeric(out[c], errors="coerce")
+    # c) bold the last *_net column
+    net_cols = [c for c in out.columns if c.endswith("_net")]
+    styler = out.style.format("{:.2f}%")
+    if net_cols:
+        styler = styler.set_properties(subset=pd.IndexSlice[:, [net_cols[-1]]], **{"font-weight": "bold"})
+    return styler
+
+
 def show_fund_monitor() -> None:
     # Preserved with track_record and net/gross charts:contentReference[oaicite:5]{index=5}
     if not ("exposures" in st.secrets and "sheet_id" in st.secrets["exposures"]):
@@ -934,25 +960,52 @@ def show_fund_monitor() -> None:
     metrics_cols[3].metric("Long", row.get("long"))
     metrics_cols[4].metric("Short", row.get("short"))
 
-    st.subheader("Number of Positions")
-    pos_cols = st.columns(2)
-    pos_cols[0].metric("Long", row.get("num_pos_long"))
-    pos_cols[1].metric("Short", row.get("num_pos_short"))
+    st.subheader("Latest Letter Summary & Positions")
+    sum_cols = st.columns([3, 1])
+
+    with sum_cols[0]:
+        bullets = []
+        try:
+            letters = _load_letters()
+            if not letters.empty and {"fund_id", "report_date", "letter_summary_5_bullets"} <= set(letters.columns):
+                fl = letters[letters["fund_id"] == selected_canonical_id].copy()
+                fl["report_date"] = pd.to_datetime(fl["report_date"], errors="coerce")
+                if not fl.empty and fl["report_date"].notna().any():
+                    latest_rd = fl["report_date"].max()
+                    latest_rows = fl[(fl["report_date"] == latest_rd)]
+                    latest_rows = latest_rows[latest_rows["letter_summary_5_bullets"].astype(str).str.strip().ne("")]
+                    if not latest_rows.empty:
+                        bullets = _split_bullets(latest_rows.iloc[0]["letter_summary_5_bullets"])
+        except Exception:
+            bullets = []
+
+        st.markdown("**Latest letter — 5 bullets**")
+        if bullets:
+            for b in bullets:
+                st.markdown(f"- {b}")
+        else:
+            st.markdown("_No summary available for the latest letter._")
+
+    with sum_cols[1]:
+        st.metric("Long positions", row.get("num_pos_long"))
+        st.metric("Short positions", row.get("num_pos_short"))
 
     sector_keys = ["sector_long","sector_short","sector_gross","sector_net"]
     geo_keys = ["geo_long","geo_short","geo_gross","geo_net"]
     st.subheader("Exposures")
     exp_cols = st.columns(2)
+
     if all(k in row.index for k in sector_keys):
         with exp_cols[0]:
             st.markdown("**Sector Exposures**")
             sector_df = build_exposure_df(row, sector_keys)
-            st.dataframe(sector_df)
+            st.dataframe(_format_exposure_table(sector_df), use_container_width=True)
+
     if all(k in row.index for k in geo_keys):
         with exp_cols[1]:
             st.markdown("**Geographical Exposures**")
             geo_df = build_exposure_df(row, geo_keys)
-            st.dataframe(geo_df)
+            st.dataframe(_format_exposure_table(geo_df), use_container_width=True)
 
     st.subheader("Historical Analysis")
     st.write("Cumulative Performance")
@@ -1464,8 +1517,7 @@ def main() -> None:
 
     elif page == "Market Views":
         st.write("## Fund Positions and Investment Thesis")
-        st.write("Latest manager portfolio positions and investment thesis are extracted from fund letters, factshee" \
-        "ts using LLM.")
+        st.write("Latest manager portfolio positions are extracted from fund letters, factsheets using LLMs and investment thesis performance are tracked.")
         st.write("Automatic PDF extraction via n8n workflowand ChatGPT API.")
         show_market_view()
     elif page == "Fund Monitor":
