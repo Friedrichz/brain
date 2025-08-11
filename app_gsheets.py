@@ -664,11 +664,10 @@ def show_market_view() -> None:
             if col not in df.columns:
                 df[col] = None
 
-        df = _parse_report_date(df, "report_date")
-        df["report_date"] = pd.to_datetime(df["report_date"], errors="coerce")
-
+        # Build display view
         view = df[[
-            "fund_name","report_date","position_name","position_ticker","position_sector","position_thesis_summary","position_duration_view"
+            "fund_name","report_date","position_name","position_ticker","position_sector",
+            "position_thesis_summary","position_duration_view"
         ]].rename(columns={
             "fund_name":"Fund Name",
             "report_date":"Report Date",
@@ -676,17 +675,31 @@ def show_market_view() -> None:
             "position_ticker":"Position Ticker",
             "position_sector":"Position Sector",
             "position_thesis_summary":"Position Thesis Summary",
-            "position_duration_view":"Position Duration View"
+            "position_duration_view":"Position Duration View",
         })
 
-        metrics = view.rename(columns={"Position Ticker":"position_ticker", "Report Date":"report_date"})
+        # Normalize display date and create calc date
+        view["Report Date"] = pd.to_datetime(view["Report Date"], errors="coerce")
+        metrics = view.rename(columns={"Position Ticker":"position_ticker"}).copy()
+        metrics["report_date_dt"] = pd.to_datetime(view["Report Date"], errors="coerce", utc=True).dt.tz_localize(None)
 
+        # Attach only MTD/YTD (per earlier change)
         metrics = _attach_return_columns(metrics, ticker_col="position_ticker")
 
-        metrics = _attach_since_report_col(metrics, ticker_col="position_ticker", report_date_col="report_date")
+        # Attach Since Report %
+        metrics = _attach_since_report_col(
+            metrics,
+            ticker_col="position_ticker",
+            report_date_col="report_date_dt",
+            colname="Since Report %",
+        )
 
+        # Restore display names, drop calc helper
+        metrics = metrics.rename(columns={"position_ticker":"Position Ticker"})
+        metrics = metrics.drop(columns=["report_date_dt"], errors="ignore")
+
+        # Order and render
         metrics = metrics.sort_values("Report Date", ascending=False)
-
         ordered_cols = [
             "Fund Name","Report Date","Position Name","Position Ticker","Position Sector",
             "Position Thesis Summary","Position Duration View","Since Report %","MTD %","YTD %"
@@ -704,6 +717,7 @@ def show_market_view() -> None:
                 "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
             },
         )
+
     
     # ── Row 2 ─────────────────────────────────────────────────────────────
     bottom_tabs = st.tabs([
