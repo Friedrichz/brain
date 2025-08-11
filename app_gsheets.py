@@ -516,6 +516,72 @@ def _attach_return_columns(df: pd.DataFrame, ticker_col: str = "position_ticker"
     return out
 
 
+def _attach_since_report_col(
+    df: pd.DataFrame,
+    ticker_col: str = "position_ticker",
+    report_date_col: str = "report_date",
+    colname: str = "Since Report %",
+) -> pd.DataFrame:
+    """
+    Adds a column with % change from the first available close on/after report_date to latest close.
+    Uses _yahoo_history_panel for prices. Returns df with the new column.
+    """
+    out = df.copy()
+    out[colname] = None
+
+    if out.empty or ticker_col not in out.columns or report_date_col not in out.columns:
+        return out
+
+    # Ensure datetimes are tz-naive to match _yahoo_history_panel filtering
+    out[report_date_col] = pd.to_datetime(out[report_date_col], errors="coerce")
+    tickers = (
+        out[ticker_col].dropna().astype(str).str.upper().str.strip()
+        .replace({"NAN": None})
+        .dropna().unique().tolist()
+    )
+    if not tickers:
+        return out
+
+    # Lookback = from earliest report_date to today, with small buffer; clamp 30..1500
+    today = pd.Timestamp.today().normalize()
+    min_rep = out[report_date_col].dropna().min()
+    if pd.isna(min_rep):
+        lookback_days = 365
+    else:
+        lookback_days = int((today - min_rep).days) + 10
+        lookback_days = max(30, min(lookback_days, 1500))
+
+    px = _yahoo_history_panel(tickers, lookback_days=lookback_days)
+    if px.empty:
+        return out
+
+    # Precompute latest close per ticker once
+    last_close = px.sort_values(["ticker", "date"]).groupby("ticker")["adj_close"].last()
+
+    # Row-wise compute anchor and return
+    def _since_row(tkr, rd):
+        if pd.isna(rd) or not isinstance(tkr, str) or not tkr.strip():
+            return None
+        t = tkr.upper().strip()
+        if t not in last_close.index:
+            return None
+        df_t = px[px["ticker"] == t]
+        # first close on/after report date
+        anchor = df_t.loc[df_t["date"] >= rd]
+        if anchor.empty:
+            return None
+        a = float(anchor.iloc[0]["adj_close"])
+        z = float(last_close.loc[t])
+        if a <= 0:
+            return None
+        return round((z / a - 1.0) * 100.0, 2)
+
+    out[colname] = [
+        _since_row(t, d) for t, d in zip(out[ticker_col], out[report_date_col])
+    ]
+    return out
+
+
 # ======== REPLACE show_market_view WITH THIS ========
 
 def show_market_view() -> None:
@@ -613,15 +679,17 @@ def show_market_view() -> None:
             "position_duration_view":"Position Duration View"
         })
 
-        metrics = view.rename(columns={"Position Ticker":"position_ticker"})
-        metrics = _attach_return_columns(metrics, ticker_col="position_ticker").rename(columns={"position_ticker":"Position Ticker"})
-        metrics = metrics.sort_values("Report Date", ascending=False)
+        metrics = view.rename(columns={"Position Ticker":"position_ticker", "Report Date":"report_date"})
+
+        metrics = _attach_return_columns(metrics, ticker_col="position_ticker")
+
+        metrics = _attach_since_report_col(metrics, ticker_col="position_ticker", report_date_col="report_date")
 
         metrics = metrics.sort_values("Report Date", ascending=False)
 
         ordered_cols = [
             "Fund Name","Report Date","Position Name","Position Ticker","Position Sector",
-            "Position Thesis Summary","Position Duration View","MTD %","YTD %"
+            "Position Thesis Summary","Position Duration View","Since Report %","MTD %","YTD %"
         ]
         metrics = metrics[ordered_cols]
 
@@ -631,6 +699,7 @@ def show_market_view() -> None:
             hide_index=True,
             column_config={
                 "Report Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD", step="day"),
+                "Since Report %": st.column_config.NumberColumn(format="%.2f%%"),
                 "MTD %": st.column_config.NumberColumn(format="%.2f%%"),
                 "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
             },
