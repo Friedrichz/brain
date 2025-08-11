@@ -670,7 +670,7 @@ def show_fund_monitor() -> None:
 
     # --- Historical Analysis Section ---
     st.subheader("Historical Analysis")
-    st.write("Looking for Google Drive folder with fund_id:", selected_canonical_id)
+    st.write("Cumulative Performance")
     
     # TRACK RECORD
     # Fetch and display historical returns
@@ -715,6 +715,7 @@ def show_fund_monitor() -> None:
         st.info("Parsed track_record.json but no returns series present.")
 
     # NET & GROSS
+    st.write("Net & Gross Exposure")
     # Filter for selected fund and remove duplicate dates
     hist_df = fund_df.copy()
     hist_df = hist_df.drop_duplicates(subset=["date"])
