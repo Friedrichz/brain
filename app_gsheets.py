@@ -328,11 +328,12 @@ def _parse_report_date(df: pd.DataFrame, col: str = "report_date") -> pd.DataFra
     return df
 
 CRYPTO_TICKERS = {
-    "BNB","PHA","TON","JUP","JTO","UNI","HNT","PYTH","DYDX","BTC","ETH","SOL","ADA","AVAX","DOGE","LINK"
+    "BNB","PHA","TON","JUP","JTO","UNI","HNT","PYTH","DYDX",
+    "BTC","ETH","SOL","ADA","AVAX","DOGE","LINK"
 }
 _SPECIAL_MAP = {
-    "EUR": "EURUSD=X",
-    "BRENT": "BZ=F",
+    "EUR": "EURUSD=X",   # FX
+    "BRENT": "BZ=F",     # ICE Brent futures
 }
 
 def _resolve_yf_symbol(t: str | None) -> str | None:
@@ -345,66 +346,101 @@ def _resolve_yf_symbol(t: str | None) -> str | None:
         return u
     if u in CRYPTO_TICKERS:
         return f"{u}-USD"
-    if len(u) == 3 and u.isalpha():
+    if len(u) == 3 and u.isalpha():   # generic FX like "EUR"
         return f"{u}USD=X"
     return u
 
 @st.cache_data(show_spinner=False, ttl=900)
-def _yahoo_history_panel(tickers: list[str], lookback_days: int = 400) -> pd.DataFrame:
+def _yahoo_history_panel(tickers: list[str], lookback_days: int = 750) -> pd.DataFrame:
+    """
+    Robust per-symbol downloader. Works even when bulk download drops all data.
+    Returns tidy frame: [date, ticker, adj_close], with 'ticker' equal to the ORIGINAL symbol.
+    """
     if not tickers:
         return pd.DataFrame(columns=["date", "ticker", "adj_close"])
 
     # map original -> yahoo symbol
-    original = [t for t in tickers if t and isinstance(t, str)]
-    mapping = {t.upper(): _resolve_yf_symbol(t) for t in original}
-    resolved = sorted({v for v in mapping.values() if v})
-    if not resolved:
-        return pd.DataFrame(columns=["date", "ticker", "adj_close"])
+    originals = [t for t in tickers if isinstance(t, str) and t.strip()]
+    mapping = {t.upper(): _resolve_yf_symbol(t) for t in originals}
 
+    frames = []
     end = pd.Timestamp.today().normalize() + pd.Timedelta(days=1)
     start = end - pd.Timedelta(days=lookback_days)
 
-    try:
-        px = yf.download(
-            tickers=resolved,
-            start=start.strftime("%Y-%m-%d"),
-            end=end.strftime("%Y-%m-%d"),
-            auto_adjust=True,
-            progress=False,
-            group_by="ticker",
-            threads=True,
-            raise_errors=False,   # suppress YFPricesMissingError / YFTzMissingError
-        )
-    except Exception:
-        px = pd.DataFrame()
+    for orig_sym, yf_sym in mapping.items():
+        if not yf_sym:
+            continue
 
-    frames = []
-    if isinstance(px.columns, pd.MultiIndex):
-        for orig_sym, yf_sym in mapping.items():
-            if (yf_sym, "Adj Close") in px.columns:
-                sub = px[(yf_sym, "Adj Close")].dropna().to_frame("adj_close")
-            elif (yf_sym, "Close") in px.columns:
-                sub = px[(yf_sym, "Close")].dropna().to_frame("adj_close")
-            else:
-                continue
-            sub = sub.reset_index().rename(columns={"Date": "date"})
-            sub["ticker"] = orig_sym
-            frames.append(sub)
-    else:
-        col = "Adj Close" if "Adj Close" in px.columns else ("Close" if "Close" in px.columns else None)
-        if col is not None and len(resolved) == 1:
-            sub = px[[col]].dropna().rename(columns={col: "adj_close"}).reset_index().rename(columns={"Date": "date"})
-            # map back to the single original
-            only_orig = next(iter(mapping.keys()))
-            sub["ticker"] = only_orig
-            frames.append(sub)
+        df_sym = pd.DataFrame()
+        # Attempt #1: standard download with explicit date range
+        try:
+            df_sym = yf.download(
+                tickers=yf_sym,
+                start=start.strftime("%Y-%m-%d"),
+                end=end.strftime("%Y-%m-%d"),
+                auto_adjust=True,
+                progress=False,
+                group_by="ticker",
+                threads=False,
+                raise_errors=False,
+            )
+        except Exception:
+            df_sym = pd.DataFrame()
+
+        # Attempt #2: per-ticker history if #1 empty or all NaN
+        if df_sym is None or df_sym.empty or (
+            isinstance(df_sym.columns, pd.Index) and df_sym.dropna(how="all").empty
+        ):
+            try:
+                h = yf.Ticker(yf_sym).history(period="730d", interval="1d", auto_adjust=True)
+                df_sym = h
+            except Exception:
+                df_sym = pd.DataFrame()
+
+        # Normalize to tidy: prefer Adj Close, fallback to Close
+        col = None
+        if isinstance(df_sym.columns, pd.MultiIndex):
+            if (yf_sym, "Adj Close") in df_sym.columns:
+                col = ("Adj Close", True)
+            elif (yf_sym, "Close") in df_sym.columns:
+                col = ("Close", True)
+        else:
+            if "Adj Close" in df_sym.columns:
+                col = ("Adj Close", False)
+            elif "Close" in df_sym.columns:
+                col = ("Close", False)
+
+        if not col:
+            continue
+
+        if col[1]:  # from multiindex
+            series = df_sym[(yf_sym, col[0])].dropna()
+        else:
+            series = df_sym[col[0]].dropna()
+
+        if series.empty:
+            continue
+
+        sub = series.to_frame("adj_close").reset_index()
+        # unify date column name for both code paths
+        if "Date" in sub.columns:
+            sub = sub.rename(columns={"Date": "date"})
+        elif "index" in sub.columns:
+            sub = sub.rename(columns={"index": "date"})
+
+        sub["date"] = pd.to_datetime(sub["date"], errors="coerce")
+        sub = sub[(sub["date"] >= start) & (sub["date"] <= end)]
+        if sub.empty:
+            continue
+
+        sub["ticker"] = orig_sym  # keep original symbol
+        frames.append(sub[["date", "ticker", "adj_close"]])
 
     if not frames:
         return pd.DataFrame(columns=["date", "ticker", "adj_close"])
 
-    out = pd.concat(frames, axis=0, ignore_index=True)
-    out["date"] = pd.to_datetime(out["date"], errors="coerce")
-    out = out.dropna(subset=["date"]).sort_values(["ticker", "date"])
+    out = pd.concat(frames, ignore_index=True)
+    out = out.dropna(subset=["date", "adj_close"]).sort_values(["ticker", "date"])
     return out
 
 
@@ -485,8 +521,6 @@ def _attach_return_columns(df: pd.DataFrame, ticker_col: str = "position_ticker"
 # ======== REPLACE show_market_view WITH THIS ========
 
 def show_market_view() -> None:
-    st.header("Market Views")
-
     letters = _load_letters()
     if letters.empty:
         st.warning("Letters table is empty or unavailable.")
@@ -494,47 +528,13 @@ def show_market_view() -> None:
     letters = _parse_report_date(letters, "report_date")
     letters = _map_fund_names(letters, fund_id_col="fund_id")
 
-    # Tabs for the three requested views + the legacy explorer retained at the end
-    tabs = st.tabs([
-        "Fund Manager Insights",
-        "Latest Fund Positions",
-        "Fund Manager Investment Thesis",
-        "Source Explorer"
+    # ── Row 1 ─────────────────────────────────────────────────────────────
+    top_tabs = st.tabs([
+        "Fund Positions",
+        "Investment Thesis",
     ])
 
-    # ---- Tab 1: Fund Manager Insights ----
-    with tabs[0]:
-        df = letters.copy()
-        if "macro_view_category" not in df.columns:
-            st.warning("Column 'macro_view_category' not found in letters.")
-            df = pd.DataFrame(columns=["Macro Category","Fund Name","Report Date","Macro View Summary","Macro View Direction"])
-        else:
-            df = df[_nonnull_mask(df["macro_view_category"])].copy()
-            for c in ["macro_view_summary","macro_view_direction"]:
-                if c not in df.columns:
-                    df[c] = None
-            df = df[["macro_view_category","fund_name","report_date","macro_view_summary","macro_view_direction"]]
-            df = _parse_report_date(df, "report_date")
-            df["report_date"] = pd.to_datetime(df["report_date"], errors="coerce")
-            df = df.rename(columns={
-                "macro_view_category": "Macro Category",
-                "fund_name": "Fund Name",
-                "report_date": "Report Date",
-                "macro_view_summary": "Macro View Summary",
-                "macro_view_direction": "Macro View Direction",
-            }).sort_values("Report Date", ascending=False)
-
-        st.dataframe(
-            df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Report Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD", step="day"),
-            },
-        )
-
-    # ---- Tab 2: Latest Fund Positions ----
-    with tabs[1]:
+    with top_tabs[0]:
         df = letters.copy()
         for col in ["position_ticker","position_weight_percent"]:
             if col not in df.columns:
@@ -589,8 +589,8 @@ def show_market_view() -> None:
                 },
             )
 
-    # ---- Tab 3: Fund Manager Investment Thesis ----
-    with tabs[2]:
+
+    with top_tabs[1]:
         df = letters.copy()
         for col in ["position_thesis_summary","position_ticker"]:
             if col not in df.columns:
@@ -639,9 +639,46 @@ def show_market_view() -> None:
                 "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
             },
         )
+    
+    # ── Row 2 ─────────────────────────────────────────────────────────────
+    bottom_tabs = st.tabs([
+        "Fund Insights",
+        "External Research"
+    ])
 
-    # 4) Legacy “Source Explorer” preserved from original Market Views
-    with tabs[3]:
+    with bottom_tabs[0]:
+        df = letters.copy()
+        if "macro_view_category" not in df.columns:
+            st.warning("Column 'macro_view_category' not found in letters.")
+            df = pd.DataFrame(columns=["Macro Category","Fund Name","Report Date","Macro View Summary","Macro View Direction"])
+        else:
+            df = df[_nonnull_mask(df["macro_view_category"])].copy()
+            for c in ["macro_view_summary","macro_view_direction"]:
+                if c not in df.columns:
+                    df[c] = None
+            df = df[["macro_view_category","fund_name","report_date","macro_view_summary","macro_view_direction"]]
+            df = _parse_report_date(df, "report_date")
+            df["report_date"] = pd.to_datetime(df["report_date"], errors="coerce")
+            df = df.rename(columns={
+                "macro_view_category": "Macro Category",
+                "fund_name": "Fund Name",
+                "report_date": "Report Date",
+                "macro_view_summary": "Macro View Summary",
+                "macro_view_direction": "Macro View Direction",
+            }).sort_values("Report Date", ascending=False)
+
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Report Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD", step="day"),
+            },
+        )
+
+
+    # 4) Legacy “External Research” preserved from original Market Views
+    with bottom_tabs[1]:
         # existing implementation preserved
         if not ("market_views" in st.secrets and "sheet_id" in st.secrets["market_views"]):
             st.error("Missing 'market_views' configuration in secrets.")
@@ -1343,7 +1380,7 @@ def main() -> None:
         st.header("Performance Estimates")
         show_performance_view()
     elif page == "Market Views":
-        st.header("Market Views")
+        # st.header("Market Views")
         show_market_view()
     elif page == "Fund Monitor":
         st.header("Fund Monitor")
