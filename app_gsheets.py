@@ -519,34 +519,30 @@ def show_fund_monitor() -> None:
 
 # 1) Monthly Seasonality Explorer
 def _fetch_history(ticker: str, start: str = "1928-01-01") -> pd.DataFrame:
-    # Use yfinance, auto-adjusted closes
+    # Pull price history with auto‑adjusted closes
     df = yf.download(ticker, start=start, auto_adjust=True, progress=False)
     if df is None or df.empty:
         raise ValueError(f"No data returned for {ticker}")
 
-    # Make a real 'date' column no matter how the index is named
+    # Reset the index to convert the datetime index into a column
     df = df.reset_index()
-    if "Date" in df.columns:
-        df = df.rename(columns={"Date": "date"})
-    elif "index" in df.columns:
-        df = df.rename(columns={"index": "date"})
-    else:
-        # fallback: pick the first datetime-like column or synthesize from the (now integer) index
-        dt_cols = [c for c in df.columns if np.issubdtype(df[c].dtype, np.datetime64)]
-        if dt_cols:
-            df = df.rename(columns={dt_cols[0]: "date"})
-        else:
-            df.insert(0, "date", pd.to_datetime(df.index))
 
-    # lower-case columns; guarantee 'adj close'
+    # Rename whichever column now holds the dates to 'date'
+    # The first column after reset_index() is the date; it may be 'Date' or 'index'
+    date_col = df.columns[0]
+    df = df.rename(columns={date_col: "date"})
+
+    # Lower-case all column names for consistency
     df.columns = [str(c).lower() for c in df.columns]
+
+    # Guarantee an 'adj close' column even if only 'close' or 'adjclose' is returned
     if "adj close" not in df.columns:
         if "close" in df.columns:
             df["adj close"] = df["close"]
         elif "adjclose" in df.columns:
             df["adj close"] = df["adjclose"]
 
-    # ensure datetime dtype
+    # Ensure the 'date' column is datetime
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     return df
 
