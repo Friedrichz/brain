@@ -1,0 +1,8 @@
+# .streamlit/config.toml
+[theme]
+base = "light"        # "light" | "dark"
+# optional brand colors:
+# primaryColor = "#2B6CB0"
+# backgroundColor = "#FFFFFF"
+# secondaryBackgroundColor = "#F6F6F6"
+# textColor = "#000000"
