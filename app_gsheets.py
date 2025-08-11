@@ -199,56 +199,108 @@ import json
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
+# --- add at top near imports ---
+from googleapiclient.errors import HttpError
 
-def fetch_track_record_json(fund_id: str) -> dict:
-    """Fetch the track_record.json from Google Drive for the given fund_id inside a parent folder."""
-    
-    DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
-    # Authenticate using service account from Streamlit secrets
+def _drive_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
     creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=DRIVE_SCOPES)
-    drive_service = build('drive', 'v3', credentials=creds)
+    return build('drive', 'v3', credentials=creds)
 
-    # Get parent folder ID from secrets
+def _download_json_from_drive(file_id: str):
+    """Download a Drive file (Docs or regular) and return parsed JSON object."""
+    svc = _drive_client()
+    try:
+        meta = svc.files().get(fileId=file_id, fields="id,name,mimeType", supportsAllDrives=True).execute()
+        mime = meta["mimeType"]
+        # Google Docs need export; regular files use media
+        if mime.startswith("application/vnd.google-apps"):
+            # Export as plain text; JSON in Docs is stored as text
+            resp = svc.files().export(fileId=file_id, mimeType="text/plain").execute()
+            raw = resp if isinstance(resp, bytes) else resp.encode("utf-8", errors="ignore")
+        else:
+            from io import BytesIO
+            from googleapiclient.http import MediaIoBaseDownload
+            req = svc.files().get_media(fileId=file_id, supportsAllDrives=True)
+            fh = BytesIO()
+            downloader = MediaIoBaseDownload(fh, req)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+            raw = fh.getvalue()
+        # Decode robustly (handles UTF‑8 BOM)
+        text = raw.decode("utf-8-sig", errors="replace").strip()
+        if not text:
+            raise ValueError("Empty file content")
+        return json.loads(text)
+    except (HttpError, ValueError, json.JSONDecodeError) as e:
+        st.error(f"Failed to parse track_record.json: {e}")
+        return None
+
+def _normalize_track_record(obj):
+    """Return a dict with `returns` = list of {date, return} from various JSON shapes."""
+    if obj is None:
+        return None
+
+    # Case A: already {"returns": [...]}
+    if isinstance(obj, dict) and "returns" in obj and isinstance(obj["returns"], list):
+        return {"returns": obj["returns"]}
+
+    # Case B: {"data":[{date,return},...]} or similar
+    if isinstance(obj, dict) and "data" in obj and isinstance(obj["data"], list):
+        return {"returns": obj["data"]}
+
+    # Case C: top-level list like: [{"track_label": "...", "data":[...], "meta": {...}}, ...]
+    if isinstance(obj, list) and obj:
+        # pick the first item that contains "data"
+        for item in obj:
+            if isinstance(item, dict) and isinstance(item.get("data"), list):
+                return {"returns": item["data"], "meta": item.get("meta"), "track_label": item.get("track_label")}
+        # if list is already the returns
+        if all(isinstance(x, dict) and {"date","return"} <= set(x.keys()) for x in obj):
+            return {"returns": obj}
+
+    # Fallback: nothing matched
+    st.warning("track_record.json structure not recognized; expected a list/dict with 'data' or 'returns'.")
+    return None
+
+def fetch_track_record_json(fund_id: str) -> dict | None:
+    """Locate 'track_record.json' in the fund folder and return a normalized object with `returns`."""
+    svc = _drive_client()
     parent_folder_id = st.secrets["drive"]["parent_folder_id"]
 
-    # Search for the folder with the fund_id as its name inside the parent folder
-    folder_query = (
+    # Find subfolder named exactly fund_id (you’ve fixed this)
+    q_folder = (
         f"'{parent_folder_id}' in parents and "
         f"name = '{fund_id}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
     )
-    folder_results = drive_service.files().list(q=folder_query, fields="files(id, name)").execute()
-    folders = folder_results.get('files', [])
+    resp = svc.files().list(
+        q=q_folder, fields="files(id,name)", includeItemsFromAllDrives=True,
+        supportsAllDrives=True, corpora="allDrives"
+    ).execute()
+    folders = resp.get("files", [])
     if not folders:
         st.warning(f"No Google Drive folder found for fund_id: {fund_id} in parent folder.")
         return None
-    folder_id = folders[0]['id']
+    folder_id = folders[0]["id"]
 
-    # Search for track_record.json in the folder
-    file_query = f"'{folder_id}' in parents and name = 'track_record.json' and trashed = false"
-    file_results = drive_service.files().list(q=file_query, fields="files(id, name)").execute()
-    files = file_results.get('files', [])
+    # Find the JSON file
+    q_file = f"'{folder_id}' in parents and name = 'track_record.json' and trashed = false"
+    resp = svc.files().list(
+        q=q_file, fields="files(id,name,mimeType)", includeItemsFromAllDrives=True,
+        supportsAllDrives=True, corpora="allDrives"
+    ).execute()
+    files = resp.get("files", [])
     if not files:
         st.warning(f"No track_record.json found in folder for fund_id: {fund_id}")
         return None
-    file_id = files[0]['id']
 
-    # Download the file content
-    request = drive_service.files().get_media(fileId=file_id)
-    from io import BytesIO
-    from googleapiclient.http import MediaIoBaseDownload
-    fh = BytesIO()
-    downloader = MediaIoBaseDownload(fh, request)
-    done = False
-    while not done:
-        status, done = downloader.next_chunk()
-    fh.seek(0)
-    try:
-        return json.load(fh)
-    except Exception as e:
-        st.error(f"Failed to parse track_record.json: {e}")
-        return None
+    obj = _download_json_from_drive(files[0]["id"])
+    return _normalize_track_record(obj)
+
+
 
 def show_performance_view() -> None:
     """Render the performance overview page using Google Sheets data, with asset class filter."""
@@ -596,17 +648,24 @@ def show_fund_monitor() -> None:
     # --- Historical Analysis Section ---
     st.subheader("Historical Analysis")
     st.write("Looking for Google Drive folder with fund_id:", selected_canonical_id)
+    
+    # TRACK RECORD
     # Fetch and display historical returns
     track_record = fetch_track_record_json(selected_canonical_id)
-    if track_record and "returns" in track_record:
+    if track_record and isinstance(track_record.get("returns"), list):
         returns_df = pd.DataFrame(track_record["returns"])
-        # Expecting columns like 'date' and 'return'
-        if "date" in returns_df.columns and "return" in returns_df.columns:
+        # Robust column normalization: accept aliases for 'return'
+        if "date" not in returns_df.columns or "return" not in returns_df.columns:
+            if "ret" in returns_df.columns and "date" in returns_df.columns:
+                returns_df = returns_df.rename(columns={"ret": "return"})
+            elif "value" in returns_df.columns and "date" in returns_df.columns:
+                returns_df = returns_df.rename(columns={"value": "return"})
+
+        if {"date", "return"} <= set(returns_df.columns):
             returns_df["date"] = returns_df["date"].apply(parse_any_date)
             returns_df = returns_df.dropna(subset=["date", "return"])
             returns_df["return"] = pd.to_numeric(returns_df["return"], errors="coerce")
-            returns_df = returns_df.dropna(subset=["return"])
-            returns_df = returns_df.sort_values("date")
+            returns_df = returns_df.dropna(subset=["return"]).sort_values("date")
             import altair as alt
             ret_chart = alt.Chart(returns_df).mark_line(point=True).encode(
                 x=alt.X("date:T", title="Date"),
@@ -615,10 +674,11 @@ def show_fund_monitor() -> None:
             ).properties(width=700, height=350)
             st.altair_chart(ret_chart, use_container_width=True)
         else:
-            st.info("track_record.json does not contain expected columns.")
+            st.info("track_record.json parsed, but expected 'date' and 'return' fields were not found.")
     elif track_record:
-        st.info("No returns data found in track_record.json.")
+        st.info("Parsed track_record.json but no returns series present.")
 
+    # NET & GROSS
     # Filter for selected fund and remove duplicate dates
     hist_df = fund_df.copy()
     hist_df = hist_df.drop_duplicates(subset=["date"])
