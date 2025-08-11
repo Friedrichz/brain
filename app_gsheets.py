@@ -982,7 +982,7 @@ def show_fund_monitor() -> None:
     metrics_cols[3].metric("Long", row.get("long"))
     metrics_cols[4].metric("Short", row.get("short"))
 
-    st.subheader("Latest Letter Summary & Positions")
+    st.subheader("Last Summary & Positions")
     sum_cols = st.columns([3, 1])
 
     with sum_cols[0]:
@@ -1083,6 +1083,8 @@ def show_fund_monitor() -> None:
                 tooltip=["date", alt.Tooltip("Exposure:N"), alt.Tooltip("Value:Q")]
             ).properties(width=700, height=350)
             st.altair_chart(chart, use_container_width=True)
+    
+    st.subheader("Meeting Notes")
 
 # =========================
 # Market Analytics Section
