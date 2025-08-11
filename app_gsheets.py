@@ -264,6 +264,8 @@ def show_performance_view() -> None:
     if "As of date" in df_display.columns:
         df_display = df_display.sort_values("As of date", ascending=False)
         df_display["As of date"] = df_display["As of date"].dt.strftime("%Y-%m-%d")
+    if "MTD" in df_display.columns:
+        df_display["MTD"] = df_display["MTD"].astype(str).fillna("")
     st.dataframe(df_display, use_container_width=True)
 
 def show_market_view() -> None:
@@ -532,6 +534,11 @@ def _fetch_history(ticker: str, start: str = "1928-01-01") -> pd.DataFrame:
 
 def _seasonality_stats(df: pd.DataFrame) -> pd.DataFrame:
     px = df.copy()
+    # ensure required columns
+    if "adj close" not in px.columns and "close" in px.columns:
+        px["adj close"] = px["close"]
+    px["date"] = pd.to_datetime(px["date"], errors="coerce")
+
     px["ret"] = px["adj close"].pct_change()
     px["year"] = px["date"].dt.year
     px["month"] = px["date"].dt.month
@@ -572,12 +579,17 @@ def view_monthly_seasonality():
 # 2) Market Memory Explorer
 def _ytd_path(df: pd.DataFrame) -> pd.DataFrame:
     px = df.copy()
+    if "adj close" not in px.columns and "close" in px.columns:
+        px["adj close"] = px["close"]
+    px["date"] = pd.to_datetime(px["date"], errors="coerce")
+
     px["ret"] = px["adj close"].pct_change().fillna(0.0)
     px["year"] = px["date"].dt.year
     px["doy"] = px["date"].dt.dayofyear
-    paths = px.groupby("year").apply(lambda g: (1+g["ret"]).cumprod() - 1.0).reset_index()
-    paths = paths.rename(columns={0:"cum"})
-    return px[["date","year","doy"]].merge(paths, on=["year","level_1"]).drop(columns=["level_1"])
+    paths = px.groupby("year").apply(lambda g: (1 + g["ret"]).cumprod() - 1.0).reset_index()
+    paths = paths.rename(columns={0: "cum"})
+    return px[["date", "year", "doy"]].merge(paths, on=["year", "level_1"]).drop(columns=["level_1"])
+
 
 def _closest_years(cur: pd.Series, hist: pd.DataFrame, k: int=5) -> List[int]:
     # Align by day-of-year, compute Euclidean distance
@@ -603,6 +615,10 @@ def view_market_memory():
         k = st.slider("Similar years", min_value=3, max_value=10, value=5)
     df = _fetch_history(ticker, start=f"{start_year}-01-01")
     px = df.copy()
+    px = df.copy()
+    if "adj close" not in px.columns and "close" in px.columns:
+        px["adj close"] = px["close"]
+    px["date"] = pd.to_datetime(px["date"], errors="coerce")
     px["ret"] = px["adj close"].pct_change().fillna(0.0)
     px["doy"] = px["date"].dt.dayofyear
     px["year"] = px["date"].dt.year
@@ -728,6 +744,7 @@ def view_liquidity_tracker():
     # Optional SPX overlay
     try:
         spy = _fetch_history("SPY", start="2015-01-01")[["date","adj close"]].rename(columns={"adj close":"spy"})
+        spy["date"] = pd.to_datetime(spy["date"], errors="coerce")
         liq = pd.merge_asof(liq.sort_values("date"), spy.sort_values("date"), on="date", direction="backward")
     except Exception:
         pass
@@ -754,6 +771,12 @@ def view_market_stress():
     hy = _fred("BAMLH0A0HYM2", start="2004-01-01").rename(columns={"value":"hy_oas"})
     curve = _fred("T10Y2Y", start="2004-01-01").rename(columns={"value":"t10y2y"})
     spy = _fetch_history("SPY", start="2004-01-01")[["date","adj close"]].rename(columns={"adj close":"spy"})
+
+    vix["date"] = pd.to_datetime(vix["date"], errors="coerce")
+    hy["date"] = pd.to_datetime(hy["date"], errors="coerce")
+    curve["date"] = pd.to_datetime(curve["date"], errors="coerce")
+    spy["date"] = pd.to_datetime(spy["date"], errors="coerce")
+    
     # Merge
     df = vix.merge(hy, on="date", how="outer").merge(curve, on="date", how="outer").merge(spy, on="date", how="outer").sort_values("date")
     df = df.ffill().dropna()
