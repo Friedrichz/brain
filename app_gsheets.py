@@ -428,7 +428,7 @@ def _yahoo_history_panel(tickers: list[str], lookback_days: int = 750) -> pd.Dat
         elif "index" in sub.columns:
             sub = sub.rename(columns={"index": "date"})
 
-        sub["date"] = pd.to_datetime(sub["date"], errors="coerce")
+        sub["date"] = pd.to_datetime(sub["date"], errors="coerce", utc=True).dt.tz_localize(None)
         sub = sub[(sub["date"] >= start) & (sub["date"] <= end)]
         if sub.empty:
             continue
