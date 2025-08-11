@@ -37,6 +37,8 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+import matplotlib.pyplot as plt
+
 # --- Drive scopes / helpers (existing) ---
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
@@ -336,7 +338,6 @@ def show_market_view() -> None:
                     st.markdown(value if pd.notna(value) else "_(empty)_")
 
 # --- Shared utilities (existing + minor helpers) ---
-
 def parse_any_date(val):
     if pd.isna(val) or not str(val).strip():
         return None
@@ -575,14 +576,41 @@ def _seasonality_stats(df: pd.DataFrame) -> pd.DataFrame:
     stats["hit_rate_pct"] = stats["hit_rate"] * 100
     return stats
 
+def _monthly_returns(df: pd.DataFrame) -> pd.DataFrame:
+    px = df.copy()
+    px["date"] = pd.to_datetime(px["date"], errors="coerce")
+    px = px.dropna(subset=["date"]).sort_values("date")
+    # month-end close then MoM return
+    px["m"] = px["date"].dt.to_period("M")
+    me = px.groupby("m", as_index=False)["adj close"].last().rename(columns={"adj close":"close_me"})
+    me["ret"] = me["close_me"].pct_change()
+    me["year"] = me["m"].dt.year
+    me["month"] = me["m"].dt.month
+    return me.dropna(subset=["ret"])
+
+def _seasonality_summary(me: pd.DataFrame) -> pd.DataFrame:
+    g = me.groupby("month")["ret"]
+    out = pd.DataFrame({
+        "median": g.median(),
+        "q1": g.quantile(0.25),
+        "q3": g.quantile(0.75),
+        "low": g.min(),
+        "high": g.max(),
+        "hit": (g.apply(lambda s: (s > 0).mean()) * 100.0)
+    }).reset_index()
+    out["month_name"] = pd.to_datetime(out["month"], format="%m").dt.strftime("%b")
+    return out.sort_values("month")
+
 # Replace the whole function
 def view_monthly_seasonality(ticker_override: str | None = None, start_year_override: int | None = None):
     st.subheader("Monthly Seasonality Explorer")
+
+    # shared controls or overrides
     if ticker_override is None or start_year_override is None:
-        tcol1, tcol2 = st.columns([2,1])
-        with tcol1:
+        c1, c2 = st.columns([2,1])
+        with c1:
             ticker = st.text_input("Ticker (Yahoo Finance)", value="SPY", key="seas_ticker")
-        with tcol2:
+        with c2:
             start_year = st.number_input("Start Year", min_value=1900, max_value=datetime.now().year, value=1990, key="seas_start")
     else:
         ticker = ticker_override
@@ -590,21 +618,61 @@ def view_monthly_seasonality(ticker_override: str | None = None, start_year_over
 
     if not ticker:
         return
+
     df = _fetch_history(ticker, start=f"{start_year}-01-01")
-    stats = _seasonality_stats(df)
-    import altair as alt
-    bars = alt.Chart(stats).mark_bar().encode(
-        x=alt.X("month:O", title="Calendar Month"),
-        y=alt.Y("median_month_return_pct:Q", title="Median Monthly Return (%)"),
-        tooltip=[alt.Tooltip("median_month_return_pct:Q", format=".2f"),
-                 alt.Tooltip("hit_rate_pct:Q", title="Hit Rate (%)", format=".1f")]
-    ).properties(height=300)
-    line = alt.Chart(stats).mark_line(point=True).encode(
-        x="month:O", y=alt.Y("hit_rate_pct:Q", title="Hit Rate (%)"), tooltip=["hit_rate_pct"]
-    ).properties(height=200)
-    st.altair_chart(bars, use_container_width=True)
-    st.altair_chart(line, use_container_width=True)
-    st.caption("Method: monthly total return by year → median by month; hit rate = share of years with positive month.")
+    me = _monthly_returns(df)
+    stats = _seasonality_summary(me)
+
+    # compute display vectors
+    months = stats["month_name"].tolist()
+    x = np.arange(len(months))
+    med = (stats["median"] * 100.0).to_numpy()
+    low = (stats["low"] * 100.0).to_numpy()
+    high = (stats["high"] * 100.0).to_numpy()
+    q1 = (stats["q1"] * 100.0).to_numpy()
+    q3 = (stats["q3"] * 100.0).to_numpy()
+    hit = stats["hit"].to_numpy()
+
+    # colors by sign of median
+    colors = np.where(med >= 0, "#2ca02c", "#d62728")  # green/red
+
+    fig, ax = plt.subplots(figsize=(10, 5.5), dpi=150)
+
+    # bar for median
+    ax.bar(x, med, width=0.6, color=colors, alpha=0.85, zorder=2)
+
+    # interquartile box overlay (q1–q3) to mimic repo style
+    ax.vlines(x, q1, q3, colors="gray", linewidth=8, alpha=0.25, zorder=1)
+
+    # whiskers min–max
+    yerr = np.vstack([med - low, high - med])
+    ax.errorbar(x, med, yerr=yerr, fmt="none", ecolor="lightgray", elinewidth=2, capsize=3, zorder=3)
+
+    # secondary axis for hit rate with black diamond markers
+    ax2 = ax.twinx()
+    ax2.plot(x, hit, marker="D", linestyle="None", color="black", markersize=6, zorder=4)
+
+    # axes formatting
+    ax.set_xticks(x, months)
+    ax.set_ylabel("Median return (%)")
+    ax2.set_ylabel("Hit rate of positive returns")
+    ax.yaxis.set_major_formatter(lambda v, pos: f"{v:.0f}%")
+    ax2.set_ylim(0, 100)
+    ax2.yaxis.set_major_formatter(lambda v, pos: f"{int(v):d}%")
+    ax.axhline(0, color="#888", linewidth=1, zorder=0)
+
+    # title span
+    yr_end = int(me["year"].max()) if not me.empty else datetime.now().year
+    ax.set_title(f"{ticker} Seasonality ({start_year}-{yr_end})", pad=12, fontweight="bold")
+
+    # best/worst banner (by median)
+    best_i = int(np.nanargmax(med))
+    worst_i = int(np.nanargmin(med))
+    best_txt = f"Best month: {months[best_i]} ({med[best_i]:.2f}%) | High {high[best_i]:.2f}% | Low {low[best_i]:.2f}%"
+    worst_txt = f"Worst month: {months[worst_i]} ({med[worst_i]:.2f}%) | High {high[worst_i]:.2f}% | Low {low[worst_i]:.2f}%"
+    st.markdown(f"**{best_txt}**  **{worst_txt}**")
+
+    st.pyplot(fig, clear_figure=True)
 
 
 # 2) Market Memory Explorer
@@ -852,7 +920,7 @@ def show_market_analytics():
     with c1:
         ticker = st.text_input("Ticker (Yahoo Finance)", value="SPY", key="ma_ticker")
     with c2:
-        start_year = st.number_input("Start Year", min_value=1900, max_value=datetime.now().year, value=1990, key="ma_start")
+        start_year = st.number_input("Start Year", min_value=1900, max_value=datetime.now().year, value=2010, key="ma_start")
     with c3:
         k = st.slider("Similar years (for Market Memory)", min_value=3, max_value=10, value=5, key="ma_k")
 
