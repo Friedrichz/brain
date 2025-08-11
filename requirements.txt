@@ -9,3 +9,4 @@ altair
 google-api-python-client
 rich<14,>=10.14.0
 yfinance
+pandas_datareader
