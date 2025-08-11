@@ -678,13 +678,13 @@ def view_monthly_seasonality(ticker_override: str | None = None, start_year_over
 # 2) Market Memory Explorer
 def _ytd_path(df: pd.DataFrame) -> pd.DataFrame:
     px = df.copy()
-    # guarantees from _fetch_history: 'date' datetime, 'adj close' present
     px["ret"] = px["adj close"].pct_change().fillna(0.0)
+    px["date"] = pd.to_datetime(px["date"], errors="coerce")
     px["year"] = px["date"].dt.year
     px["doy"] = px["date"].dt.dayofyear
-    # per-year cumulative return from Jan 1 of each year
     px["cum"] = (1.0 + px["ret"]).groupby(px["year"]).cumprod() - 1.0
     return px[["doy", "year", "cum"]]
+
 
 
 def _closest_years(cur: pd.Series, hist: pd.DataFrame, k: int=5) -> List[int]:
@@ -747,7 +747,12 @@ def view_market_memory(ticker_override: str | None = None, start_year_override: 
     others = alt.Chart(px[px["year"].isin(years)]).mark_line(opacity=0.5).encode(
         x="doy:Q", y="cum:Q", color="year:N"
     )
-    st.altair_chart(others + base, use_container_width=True)
+    chart = others + base
+    st.altair_chart(
+        chart,
+        use_container_width=True,
+        key=f"mm_chart_{ticker}_{start_year}_{k}"
+    )
 
 
 # 3) Breakout Scanner
@@ -920,7 +925,7 @@ def show_market_analytics():
     with c1:
         ticker = st.text_input("Ticker (Yahoo Finance)", value="SPY", key="ma_ticker")
     with c2:
-        start_year = st.number_input("Start Year", min_value=1900, max_value=datetime.now().year, value=2010, key="ma_start")
+        start_year = st.number_input("Start Year", min_value=1900, max_value=datetime.now().year, value=2020, key="ma_start")
     with c3:
         k = st.slider("Similar years (for Market Memory)", min_value=3, max_value=10, value=5, key="ma_k")
 
