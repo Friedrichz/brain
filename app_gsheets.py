@@ -327,47 +327,86 @@ def _parse_report_date(df: pd.DataFrame, col: str = "report_date") -> pd.DataFra
         df[col] = pd.to_datetime(df[col], errors="coerce")
     return df
 
+CRYPTO_TICKERS = {
+    "BNB","PHA","TON","JUP","JTO","UNI","HNT","PYTH","DYDX","BTC","ETH","SOL","ADA","AVAX","DOGE","LINK"
+}
+_SPECIAL_MAP = {
+    "EUR": "EURUSD=X",
+    "BRENT": "BZ=F",
+}
+
+def _resolve_yf_symbol(t: str | None) -> str | None:
+    if t is None:
+        return None
+    u = str(t).strip().upper()
+    if u in _SPECIAL_MAP:
+        return _SPECIAL_MAP[u]
+    if u.endswith("-USD") or u.endswith("=X") or "." in u:
+        return u
+    if u in CRYPTO_TICKERS:
+        return f"{u}-USD"
+    if len(u) == 3 and u.isalpha():
+        return f"{u}USD=X"
+    return u
+
 @st.cache_data(show_spinner=False, ttl=900)
 def _yahoo_history_panel(tickers: list[str], lookback_days: int = 400) -> pd.DataFrame:
-    """
-    Fetch adjusted close for the set of tickers for ~400 calendar days.
-    Returns tidy frame: columns [date, ticker, adj_close]
-    """
     if not tickers:
         return pd.DataFrame(columns=["date", "ticker", "adj_close"])
-    tickers = sorted({t.strip().upper() for t in tickers if t and isinstance(t, str)})
-    if not tickers:
+
+    # map original -> yahoo symbol
+    original = [t for t in tickers if t and isinstance(t, str)]
+    mapping = {t.upper(): _resolve_yf_symbol(t) for t in original}
+    resolved = sorted({v for v in mapping.values() if v})
+    if not resolved:
         return pd.DataFrame(columns=["date", "ticker", "adj_close"])
+
     end = pd.Timestamp.today().normalize() + pd.Timedelta(days=1)
     start = end - pd.Timedelta(days=lookback_days)
-    px = yf.download(tickers=tickers, start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"),
-                     auto_adjust=True, progress=False, group_by="ticker", threads=True)
-    # Normalize to tidy
+
+    try:
+        px = yf.download(
+            tickers=resolved,
+            start=start.strftime("%Y-%m-%d"),
+            end=end.strftime("%Y-%m-%d"),
+            auto_adjust=True,
+            progress=False,
+            group_by="ticker",
+            threads=True,
+            raise_errors=False,   # suppress YFPricesMissingError / YFTzMissingError
+        )
+    except Exception:
+        px = pd.DataFrame()
+
     frames = []
     if isinstance(px.columns, pd.MultiIndex):
-        for t in tickers:
-            if (t, "Adj Close") in px.columns:
-                sub = px[(t, "Adj Close")].dropna().to_frame("adj_close")
-            elif (t, "Close") in px.columns:
-                sub = px[(t, "Close")].dropna().to_frame("adj_close")
+        for orig_sym, yf_sym in mapping.items():
+            if (yf_sym, "Adj Close") in px.columns:
+                sub = px[(yf_sym, "Adj Close")].dropna().to_frame("adj_close")
+            elif (yf_sym, "Close") in px.columns:
+                sub = px[(yf_sym, "Close")].dropna().to_frame("adj_close")
             else:
                 continue
             sub = sub.reset_index().rename(columns={"Date": "date"})
-            sub["ticker"] = t
+            sub["ticker"] = orig_sym
             frames.append(sub)
     else:
-        # single-ticker case
         col = "Adj Close" if "Adj Close" in px.columns else ("Close" if "Close" in px.columns else None)
-        if col is not None:
+        if col is not None and len(resolved) == 1:
             sub = px[[col]].dropna().rename(columns={col: "adj_close"}).reset_index().rename(columns={"Date": "date"})
-            sub["ticker"] = tickers[0]
+            # map back to the single original
+            only_orig = next(iter(mapping.keys()))
+            sub["ticker"] = only_orig
             frames.append(sub)
+
     if not frames:
         return pd.DataFrame(columns=["date", "ticker", "adj_close"])
+
     out = pd.concat(frames, axis=0, ignore_index=True)
     out["date"] = pd.to_datetime(out["date"], errors="coerce")
     out = out.dropna(subset=["date"]).sort_values(["ticker", "date"])
     return out
+
 
 def _return_slice(px: pd.DataFrame, when: str) -> pd.Series:
     """
@@ -409,29 +448,34 @@ def _return_slice(px: pd.DataFrame, when: str) -> pd.Series:
     return pd.Series(dtype=float)
 
 def _attach_return_columns(df: pd.DataFrame, ticker_col: str = "position_ticker") -> pd.DataFrame:
-    """
-    Adds 1d %, 1w %, MTD %, YTD % based on Yahoo data for unique tickers in df[ticker_col].
-    """
     if df.empty or ticker_col not in df.columns:
         for c in ["1d %","1w %","MTD %","YTD %"]:
             df[c] = None
         return df
+
     tickers = [t for t in df[ticker_col].astype(str).str.upper().tolist() if t and t != "NAN"]
     px = _yahoo_history_panel(tickers)
     if px.empty:
         for c in ["1d %","1w %","MTD %","YTD %"]:
             df[c] = None
         return df
-    r1d = _return_slice(px, "1d")
-    r1w = _return_slice(px, "1w")
+
+    r1d  = _return_slice(px, "1d")
+    r1w  = _return_slice(px, "1w")
     rmtd = _return_slice(px, "mtd")
     rytd = _return_slice(px, "ytd")
+
     out = df.copy()
-    def _map(series, ticker):
+
+    def _map(series: pd.Series, t):
+        v = series.get(str(t).upper())
+        if v is None or pd.isna(v):
+            return None
         try:
-            return round(float(series.get(str(ticker).upper())), 2)
+            return round(float(v), 2)
         except Exception:
             return None
+
     out["1d %"]  = out[ticker_col].apply(lambda t: _map(r1d, t))
     out["1w %"]  = out[ticker_col].apply(lambda t: _map(r1w, t))
     out["MTD %"] = out[ticker_col].apply(lambda t: _map(rmtd, t))
