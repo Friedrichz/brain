@@ -874,6 +874,29 @@ def percent_to_float(val):
     except Exception:
         return None
 
+def aum_to_float(val):
+    if pd.isna(val):
+        return None
+    s = str(val).strip().lower().replace(",", "")
+    # fast path
+    x = pd.to_numeric(s.replace("$", ""), errors="coerce")
+    if pd.notna(x):
+        return float(x)
+    # unit parsing
+    import re
+    m = re.search(r"([-+]?\d*\.?\d+)", s)
+    if not m:
+        return None
+    num = float(m.group(1))
+    if "bn" in s or s.endswith(" b") or s.endswith("b"):
+        return num * 1e9
+    if "mm" in s or "mn" in s or "m" in s:
+        return num * 1e6
+    if "k" in s:
+        return num * 1e3
+    return num
+
+
 # ADD near other helpers (below percent_to_float)
 import re
 
@@ -1089,7 +1112,7 @@ def show_fund_monitor() -> None:
     
     c1, c2 = st.columns(2, vertical_alignment="top")
     with c1:
-        st.subheader("Fund Positions & Performance")
+        st.subheader("Fund Positions")
         try:
             letters = _load_letters()
         except Exception:
@@ -1139,8 +1162,8 @@ def show_fund_monitor() -> None:
 
                 # final column order (no Fund Name)
                 metrics = metrics[[
-                    "Position Name", "Position Ticker", "Position Sector",
-                    "Position Weight (%)", "Report Date", "MTD %", "YTD %"
+                    "Position Name","Position Sector",
+                    "Position Weight (%)", "MTD %", "YTD %"
                 ]]
 
                 st.dataframe(
@@ -1156,7 +1179,39 @@ def show_fund_monitor() -> None:
                 )
 
     with c2:
-        st.subheader("Meeting Notes")
+        st.subheader("Historical AUM")
+        aum_hist = fund_df.copy()
+
+        # normalize date and aum
+        aum_hist["date"] = pd.to_datetime(aum_hist["date"], errors="coerce")
+        aum_hist["aum_fund_num"] = aum_hist["aum_fund"].apply(aum_to_float)
+
+        aum_hist = (
+            aum_hist.dropna(subset=["date", "aum_fund_num"])
+                    .sort_values("date")
+                    .drop_duplicates(subset=["date"], keep="last")
+                    .rename(columns={"aum_fund_num": "AUM"})
+        )
+
+        if aum_hist.empty:
+            st.info("No AUM history available.")
+        else:
+            import altair as alt
+            ch = (
+                alt.Chart(aum_hist)
+                .mark_line(point=True)
+                .encode(
+                    x=alt.X("date:T", title="Date"),
+                    y=alt.Y("AUM:Q", title="AUM", axis=alt.Axis(format=",.0f")),
+                    tooltip=[
+                        alt.Tooltip("date:T", title="Date"),
+                        alt.Tooltip("AUM:Q", title="AUM", format=",.0f"),
+                    ],
+                )
+                .properties(height=350)
+            )
+            st.altair_chart(ch, use_container_width=True)
+
 
 # =========================
 # Market Analytics Section
@@ -1619,7 +1674,8 @@ def main() -> None:
     elif page == "Market Views":
         st.write("## Fund Positions and Investment Thesis")
         st.write("Latest manager portfolio positions are extracted from fund letters, factsheets using LLMs and investment thesis performance are tracked.")
-        st.write("Automatic PDF extraction via n8n workflowand ChatGPT API.")
+        st.write("Automatic PDF extraction when files are received via n8n workflowand ChatGPT API.")
+        st.write("Data stored in a cloud drive and pulled in/transformed below.")
         show_market_view()
     elif page == "Fund Monitor":
         st.header("Fund Monitor")
