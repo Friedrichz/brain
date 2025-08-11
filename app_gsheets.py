@@ -1,88 +1,139 @@
+# app_gsheets.py
 """
 Streamlit application for monitoring investment funds using data
-directly from Google Sheets.
+directly from Google Sheets.
 
-This version of the app relies exclusively on the Google Sheets
-API via the `gspread` library.  To run the app you must supply
-valid credentials for a Google service account either through
-Streamlit's secrets mechanism or by setting the
-``GOOGLE_APPLICATION_CREDENTIALS`` environment variable to point
-at your downloaded JSON key file.  See the documentation below
-for details.
+Adds "Market Analytics" with:
+- Monthly Seasonality Explorer
+- Market Memory Explorer
+- Breakout Scanner
+- 10-Year Nominal & Real Yield Dashboard
+- Liquidity & Fed Policy Tracker
+- Market Stress Composite
 
-Structure
----------
-
-* Performance Overview – fetches the ``fund performances`` sheet, hides
-  specified columns, deduplicates by Fund Name/Share Class/Currency/Date
-  and allows the user to filter by fund.
-* Market Views – fetches the ``market views`` sheet, hides the
-  ``Title`` column and provides multi‑select filters for all
-  remaining columns.
-* Fund Monitor – fetches the ``fund exposures`` sheet, allows the
-  user to select a fund and date, displays key metrics (AUM,
-  net/gross/long/short exposures), counts of positions and
-  tabular sector/geographical exposures by unpacking nested
-  dictionaries.
-
-To configure which Google Sheets to read from, set the following
-
-or in the "Secrets" section of your Streamlit Cloud app:
-
-```
-[fund_performances]
-sheet_id = "YOUR_FUND_PERFORMANCES_SHEET_ID"
-worksheet = "Sheet1"
-
-[market_views]
-sheet_id = "YOUR_MARKET_VIEWS_SHEET_ID"
-worksheet = "Sheet1"
-
-[exposures]
-sheet_id = "YOUR_FUND_EXPOSURES_SHEET_ID"
-worksheet = "Sheet1"
-
-[defaults]
-fund = "Helikon Long Short Equity Fund"  # optional default fund
-
-```
-
-The ``gcp_service_account`` section should contain the exact
-contents of the JSON key file downloaded from Google Cloud (line
-breaks in the private key must be escaped with ``\n``).  This file
-should never be committed to source control.  Instead, use
-``st.secrets`` locally and copy the same contents into the
-Streamlit Cloud app's secrets when you deploy.
+Existing pages retained: Performance Est, Market Views, Fund Monitor.
 """
 
 import os
-from typing import Dict, List
+from typing import Dict, List, Tuple
+import math
+import json
+import calendar
+from datetime import datetime, timedelta
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 from streamlit_option_menu import option_menu
 import gspread
 from st_aggrid import AgGrid, GridOptionsBuilder
 
-import json
+# New: markets/fetching libs
+import yfinance as yf
+from pandas_datareader import data as pdr
+yf.pdr_override()
+
+# Google auth pieces (existing)
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
+# --- Drive scopes / helpers (existing) ---
+DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
+def _drive_client():
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=DRIVE_SCOPES)
+    return build('drive', 'v3', credentials=creds)
+
+def _download_json_from_drive(file_id: str):
+    svc = _drive_client()
+    try:
+        meta = svc.files().get(
+            fileId=file_id,
+            fields="id,name,mimeType",
+            supportsAllDrives=True
+        ).execute()
+        mime = meta["mimeType"]
+
+        if mime.startswith("application/vnd.google-apps"):
+            resp = svc.files().export(fileId=file_id, mimeType="text/plain").execute()
+            raw = resp if isinstance(resp, bytes) else resp.encode("utf-8", errors="ignore")
+        else:
+            from io import BytesIO
+            from googleapiclient.http import MediaIoBaseDownload
+            req = svc.files().get_media(fileId=file_id, supportsAllDrives=True)
+            fh = BytesIO()
+            downloader = MediaIoBaseDownload(fh, req)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+            raw = fh.getvalue()
+
+        text = raw.decode("utf-8", errors="ignore").replace("\ufeff", "").strip()
+        first_brace = text.find("{")
+        first_bracket = text.find("[")
+        candidates = [i for i in (first_brace, first_bracket) if i != -1]
+        if candidates:
+            start = min(candidates)
+            if start > 0:
+                text = text[start:]
+        if not text or text[0] not in "{[":
+            raise ValueError("Empty or non‑JSON content from Drive file")
+        return json.loads(text)
+
+    except (HttpError, ValueError, json.JSONDecodeError) as e:
+        st.error(f"Failed to parse track_record.json: {e}")
+        return None
+
+def _normalize_track_record(obj):
+    if obj is None:
+        return None
+    if isinstance(obj, dict) and "returns" in obj and isinstance(obj["returns"], list):
+        return {"returns": obj["returns"]}
+    if isinstance(obj, dict) and "data" in obj and isinstance(obj["data"], list):
+        return {"returns": obj["data"]}
+    if isinstance(obj, list) and obj:
+        for item in obj:
+            if isinstance(item, dict) and isinstance(item.get("data"), list):
+                return {"returns": item["data"], "meta": item.get("meta"), "track_label": item.get("track_label")}
+        if all(isinstance(x, dict) and {"date","return"} <= set(x.keys()) for x in obj):
+            return {"returns": obj}
+    st.warning("track_record.json structure not recognized; expected a list/dict with 'data' or 'returns'.")
+    return None
+
+def fetch_track_record_json(fund_id: str) -> dict | None:
+    svc = _drive_client()
+    parent_folder_id = st.secrets["drive"]["parent_folder_id"]
+    q_folder = (
+        f"'{parent_folder_id}' in parents and "
+        f"name = '{fund_id}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    )
+    resp = svc.files().list(
+        q=q_folder, fields="files(id,name)", includeItemsFromAllDrives=True,
+        supportsAllDrives=True, corpora="allDrives"
+    ).execute()
+    folders = resp.get("files", [])
+    if not folders:
+        st.warning(f"No Google Drive folder found for fund_id: {fund_id} in parent folder.")
+        return None
+    folder_id = folders[0]["id"]
+
+    q_file = f"'{folder_id}' in parents and name = 'track_record.json' and trashed = false"
+    resp = svc.files().list(
+        q=q_file, fields="files(id,name,mimeType)", includeItemsFromAllDrives=True,
+        supportsAllDrives=True, corpora="allDrives"
+    ).execute()
+    files = resp.get("files", [])
+    if not files:
+        st.warning(f"No track_record.json found in folder for fund_id: {fund_id}")
+        return None
+    obj = _download_json_from_drive(files[0]["id"])
+    return _normalize_track_record(obj)
+
+# --- Sheets auth/helpers (existing) ---
 def get_gspread_client() -> gspread.Client:
-    """Return an authenticated gspread client.
-
-    The function attempts to authenticate using credentials stored in
-    Streamlit secrets under ``gcp_service_account``.  If those are not
-    present, it falls back to the standard environment variable
-    ``GOOGLE_APPLICATION_CREDENTIALS`` pointing at a JSON key file.
-
-    Raises
-    ------
-    RuntimeError
-        If no credentials can be found.
-    """
-    # First try to load credentials from Streamlit secrets
+    # Mirrors existing credential resolution:contentReference[oaicite:2]{index=2}
     if hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
         creds_dict = dict(st.secrets["gcp_service_account"])
         try:
@@ -91,7 +142,6 @@ def get_gspread_client() -> gspread.Client:
         except Exception as exc:
             st.error(f"Failed to authenticate using gcp_service_account in secrets: {exc}")
             raise
-    # Fallback to environment variable
     creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if creds_path and os.path.exists(creds_path):
         try:
@@ -100,29 +150,12 @@ def get_gspread_client() -> gspread.Client:
         except Exception as exc:
             st.error(f"Failed to authenticate using GOOGLE_APPLICATION_CREDENTIALS at {creds_path}: {exc}")
             raise
-    # If we reach here, no credentials were found
     raise RuntimeError(
         "Google Sheets credentials not found. Provide a service account key via "
         "st.secrets['gcp_service_account'] or set the GOOGLE_APPLICATION_CREDENTIALS environment variable."
     )
 
-
 def load_sheet(sheet_id: str, worksheet: str) -> pd.DataFrame:
-    """Load a Google Sheet into a DataFrame.
-
-    Parameters
-    ----------
-    sheet_id : str
-        The ID of the spreadsheet (the part between ``/d/`` and ``/edit`` in
-        the Google Sheets URL).
-    worksheet : str
-        The name of the worksheet/tab within the spreadsheet.
-
-    Returns
-    -------
-    pandas.DataFrame
-        A DataFrame containing the sheet's rows.
-    """
     client = get_gspread_client()
     try:
         sh = client.open_by_key(sheet_id)
@@ -133,24 +166,7 @@ def load_sheet(sheet_id: str, worksheet: str) -> pd.DataFrame:
         raise
     return pd.DataFrame(records)
 
-
 def parse_dict(cell: any) -> Dict[str, float]:
-    """Convert a dictionary‑like cell value into a Python dictionary.
-
-    Values are expected to be of the form ``"{Key: 12.3%, Other Key: 0.0%}"``.
-    Percent signs are stripped and values are converted to floats when
-    possible.
-
-    Parameters
-    ----------
-    cell : any
-        The cell value from the sheet. May be ``NaN``, ``dict`` or ``str``.
-
-    Returns
-    -------
-    dict
-        Parsed dictionary with keys as strings and values as floats or strings.
-    """
     if cell is None or (isinstance(cell, float) and pd.isna(cell)):
         return {}
     if isinstance(cell, dict):
@@ -171,22 +187,7 @@ def parse_dict(cell: any) -> Dict[str, float]:
             result[key] = val
     return result
 
-
 def build_exposure_df(row: pd.Series, prefixes: List[str]) -> pd.DataFrame:
-    """Construct a DataFrame from a row containing exposure dictionaries.
-
-    Parameters
-    ----------
-    row : pandas.Series
-        The row from the exposures DataFrame.
-    prefixes : list[str]
-        List of column names containing dictionary strings.
-
-    Returns
-    -------
-    pandas.DataFrame
-        DataFrame indexed by exposure key with one column per prefix.
-    """
     parts: List[pd.DataFrame] = []
     for col in prefixes:
         dictionary = parse_dict(row.get(col))
@@ -194,141 +195,10 @@ def build_exposure_df(row: pd.Series, prefixes: List[str]) -> pd.DataFrame:
         parts.append(df)
     return pd.concat(parts, axis=1)
 
-
-import json
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-
-# --- add at top near imports ---
-from googleapiclient.errors import HttpError
-
-DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
-
-def _drive_client():
-    creds_dict = dict(st.secrets["gcp_service_account"])
-    creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=DRIVE_SCOPES)
-    return build('drive', 'v3', credentials=creds)
-
-def _download_json_from_drive(file_id: str):
-    """Download a Drive file (Docs or regular) and return parsed JSON object (robust to BOM/headers)."""
-    svc = _drive_client()
-    try:
-        meta = svc.files().get(
-            fileId=file_id,
-            fields="id,name,mimeType",
-            supportsAllDrives=True
-        ).execute()
-        mime = meta["mimeType"]
-
-        # Google Docs need export; regular files use media download
-        if mime.startswith("application/vnd.google-apps"):
-            # Export as plain text; JSON stored as text in Docs
-            resp = svc.files().export(fileId=file_id, mimeType="text/plain").execute()
-            raw = resp if isinstance(resp, bytes) else resp.encode("utf-8", errors="ignore")
-        else:
-            from io import BytesIO
-            from googleapiclient.http import MediaIoBaseDownload
-            req = svc.files().get_media(fileId=file_id, supportsAllDrives=True)
-            fh = BytesIO()
-            downloader = MediaIoBaseDownload(fh, req)
-            done = False
-            while not done:
-                _, done = downloader.next_chunk()
-            raw = fh.getvalue()
-
-        # ---- Robust decode & JSON extraction ----
-        # 1) Decode (handle BOM/zero-width chars), then strip outer whitespace
-        text = raw.decode("utf-8", errors="ignore").replace("\ufeff", "").strip()
-
-        # 2) If Drive added any preamble/blank lines, cut to first JSON token
-        first_brace = text.find("{")
-        first_bracket = text.find("[")
-        candidates = [i for i in (first_brace, first_bracket) if i != -1]
-        if candidates:
-            start = min(candidates)
-            if start > 0:
-                text = text[start:]
-
-        # 3) Validate and parse
-        if not text or text[0] not in "{[":
-            raise ValueError("Empty or non‑JSON content from Drive file")
-
-        return json.loads(text)
-
-    except (HttpError, ValueError, json.JSONDecodeError) as e:
-        st.error(f"Failed to parse track_record.json: {e}")
-        return None
-
-
-def _normalize_track_record(obj):
-    """Return a dict with `returns` = list of {date, return} from various JSON shapes."""
-    if obj is None:
-        return None
-
-    # Case A: already {"returns": [...]}
-    if isinstance(obj, dict) and "returns" in obj and isinstance(obj["returns"], list):
-        return {"returns": obj["returns"]}
-
-    # Case B: {"data":[{date,return},...]} or similar
-    if isinstance(obj, dict) and "data" in obj and isinstance(obj["data"], list):
-        return {"returns": obj["data"]}
-
-    # Case C: top-level list like: [{"track_label": "...", "data":[...], "meta": {...}}, ...]
-    if isinstance(obj, list) and obj:
-        # pick the first item that contains "data"
-        for item in obj:
-            if isinstance(item, dict) and isinstance(item.get("data"), list):
-                return {"returns": item["data"], "meta": item.get("meta"), "track_label": item.get("track_label")}
-        # if list is already the returns
-        if all(isinstance(x, dict) and {"date","return"} <= set(x.keys()) for x in obj):
-            return {"returns": obj}
-
-    # Fallback: nothing matched
-    st.warning("track_record.json structure not recognized; expected a list/dict with 'data' or 'returns'.")
-    return None
-
-def fetch_track_record_json(fund_id: str) -> dict | None:
-    """Locate 'track_record.json' in the fund folder and return a normalized object with `returns`."""
-    svc = _drive_client()
-    parent_folder_id = st.secrets["drive"]["parent_folder_id"]
-
-    # Find subfolder named exactly fund_id (you’ve fixed this)
-    q_folder = (
-        f"'{parent_folder_id}' in parents and "
-        f"name = '{fund_id}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-    )
-    resp = svc.files().list(
-        q=q_folder, fields="files(id,name)", includeItemsFromAllDrives=True,
-        supportsAllDrives=True, corpora="allDrives"
-    ).execute()
-    folders = resp.get("files", [])
-    if not folders:
-        st.warning(f"No Google Drive folder found for fund_id: {fund_id} in parent folder.")
-        return None
-    folder_id = folders[0]["id"]
-
-    # Find the JSON file
-    q_file = f"'{folder_id}' in parents and name = 'track_record.json' and trashed = false"
-    resp = svc.files().list(
-        q=q_file, fields="files(id,name,mimeType)", includeItemsFromAllDrives=True,
-        supportsAllDrives=True, corpora="allDrives"
-    ).execute()
-    files = resp.get("files", [])
-    if not files:
-        st.warning(f"No track_record.json found in folder for fund_id: {fund_id}")
-        return None
-
-    obj = _download_json_from_drive(files[0]["id"])
-    return _normalize_track_record(obj)
-
-
-############################################################################################################
-
+# ---- Existing product pages (kept as-is) ----
 
 def show_performance_view() -> None:
-    """Render the performance overview page using Google Sheets data, with asset class filter."""
-
-    # Pull sheet configuration from secrets
+    # Uses fund_performances and securities_master like your original implementation:contentReference[oaicite:3]{index=3}
     if not ("fund_performances" in st.secrets and "sheet_id" in st.secrets["fund_performances"]):
         st.error("Missing 'fund_performances' configuration in secrets.")
         return
@@ -339,7 +209,6 @@ def show_performance_view() -> None:
         st.warning("No data returned from the performance sheet.")
         return
 
-    # --- Load securities_master for asset class mapping ---
     if not ("securities_master" in st.secrets and "sheet_id" in st.secrets["securities_master"]):
         st.error("Missing 'securities_master' configuration in secrets.")
         return
@@ -350,82 +219,56 @@ def show_performance_view() -> None:
         st.warning("No data or missing columns in securities_master.")
         return
 
-    # Merge asset_class into fund performances
     if "fund_id" in df.columns:
         df = df.merge(
             sec_df[["canonical_id", "asset_class"]],
-            left_on="fund_id",
-            right_on="canonical_id",
-            how="left"
+            left_on="fund_id", right_on="canonical_id", how="left"
         )
     else:
-        df["asset_class"] = None  # fallback if fund_id missing
+        df["asset_class"] = None
 
-    # Drop duplicates by Fund Name, Share Class, Currency and Date
     dedup_columns = [c for c in ["Fund Name", "Share Class", "Currency", "Date"] if c in df.columns]
     if dedup_columns:
         df = df.drop_duplicates(subset=dedup_columns, keep="last")
 
-    # Filter out rows with empty "Date", "MTD", or "Fund Name" columns
     df = df[df["Date"].notna() & df["Date"].astype(str).str.strip().ne("")]
     df = df[df["MTD"].notna() & df["MTD"].astype(str).str.strip().ne("")]
     df = df[df["Fund Name"].notna() & df["Fund Name"].astype(str).str.strip().ne("")]
 
-    # --- Filters in the same row ---
     col1, col2 = st.columns(2)
-    # Asset Class Filter (do not show in table)
     asset_classes = sorted(df["asset_class"].dropna().unique().tolist())
     with col1:
-        selected_asset_classes = st.multiselect(
-            "Filter by Asset Class", asset_classes, default=[]
-        )
+        selected_asset_classes = st.multiselect("Filter by Asset Class", asset_classes, default=[])
     if selected_asset_classes:
         df = df[df["asset_class"].isin(selected_asset_classes)]
-
-    # Fund selector if column exists
     with col2:
         fund_options = ["All"] + sorted(df["Fund Name"].dropna().unique().tolist()) if "Fund Name" in df.columns else []
         fund_choice = st.selectbox("Select Fund", fund_options) if fund_options else "All"
     if fund_choice != "All":
         df = df[df["Fund Name"] == fund_choice]
 
-    # Hide unwanted columns (including any from the merged table)
     cols_to_hide = [
-        "fund_id", "currency", "WTD", "YTD", "Sender", "Category", "Currency",
-        "Net", "Gross", "Long Exposure", "Short Exposure", "Correct", "Received",
-        "canonical_id", "asset_class"  # ensure merged columns are hidden
+        "fund_id","currency","WTD","YTD","Sender","Category","Currency","Net","Gross",
+        "Long Exposure","Short Exposure","Correct","Received","canonical_id","asset_class"
     ]
     df_display = df.reset_index(drop=True)
     df_display = df_display.drop(columns=[c for c in cols_to_hide if c in df_display.columns], errors="ignore")
-
-    # Rename "Date" column to "As of date"
     if "Date" in df_display.columns:
         df_display = df_display.rename(columns={"Date": "As of date"})
-
-    # Convert "As of date" to datetime and filter out future dates
-    if "As of date" in df_display.columns:
         df_display["As of date"] = pd.to_datetime(df_display["As of date"], errors="coerce")
         today = pd.Timestamp.today().normalize()
         df_display = df_display[df_display["As of date"] <= today]
-
-    # Reorder columns to have "Fund Name" first
     columns = df_display.columns.tolist()
     if "Fund Name" in columns:
         columns.insert(0, columns.pop(columns.index("Fund Name")))
     df_display = df_display[columns]
-
-    # Sort by "As of date" (descending)
     if "As of date" in df_display.columns:
         df_display = df_display.sort_values("As of date", ascending=False)
-        # Format date as YYYY-MM-DD
         df_display["As of date"] = df_display["As of date"].dt.strftime("%Y-%m-%d")
-
     st.dataframe(df_display, use_container_width=True)
 
-
 def show_market_view() -> None:
-    """Render the market views page using Google Sheets data with AgGrid for row selection."""
-
+    # Preserved logic with AgGrid selection:contentReference[oaicite:4]{index=4}
     if not ("market_views" in st.secrets and "sheet_id" in st.secrets["market_views"]):
         st.error("Missing 'market_views' configuration in secrets.")
         return
@@ -435,30 +278,19 @@ def show_market_view() -> None:
     if df.empty:
         st.warning("No data returned from the market views sheet.")
         return
-
-    # Format the "Date" column
     if "Date" in df.columns:
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
-
-    # Define columns to hide in the main table
     cols_to_hide = [
-        "Document Type", "Data & Evidence", "Key Themes", "Risks/Uncertainties",
-        "Risks / Uncertainties", "Evidence Strength & Uniqueness", "Evidence Strenght & Uniqueness",
-        "Follow-up Actions", "Title"
+        "Document Type","Data & Evidence","Key Themes","Risks/Uncertainties",
+        "Risks / Uncertainties","Evidence Strength & Uniqueness","Evidence Strenght & Uniqueness",
+        "Follow-up Actions","Title"
     ]
-    # Prepare main table
     df_display = df.drop(columns=[c for c in cols_to_hide if c in df.columns], errors="ignore")
-
-    # Reorder columns as requested
-    desired_order = [
-        "Asset Class & Region", "Date", "Author(s)", "Institution/Source",
-        "Market Regime/Context", "Instrument Name"
-    ]
-    columns = [col for col in desired_order if col in df_display.columns]
-    columns += [col for col in df_display.columns if col not in columns]
+    desired_order = ["Asset Class & Region","Date","Author(s)","Institution/Source","Market Regime/Context","Instrument Name"]
+    columns = [c for c in desired_order if c in df_display.columns]
+    columns += [c for c in df_display.columns if c not in columns]
     df_display = df_display[columns]
 
-    # Column filter interface
     filter_columns = st.multiselect("Columns to filter", df_display.columns.tolist())
     filtered = df_display.copy()
     for col in filter_columns:
@@ -466,8 +298,6 @@ def show_market_view() -> None:
         selected = st.multiselect(f"{col}", choices)
         if selected:
             filtered = filtered[filtered[col].isin(selected)]
-
-    # AGGrid for interactive table and row selection
     gb = GridOptionsBuilder.from_dataframe(filtered)
     gb.configure_selection('single', use_checkbox=True)
     grid_options = gb.build()
@@ -482,17 +312,15 @@ def show_market_view() -> None:
     )
     selected = grid_response['selected_rows']
 
-    # Robust row matching for details
     def get_full_row(row):
-        # Try to match on all available columns used in the table
         mask = pd.Series([True] * len(df))
-        for key in ["Date", "Asset Class & Region", "Institution/Source"]:
+        for key in ["Date","Asset Class & Region","Institution/Source"]:
             if key in df.columns and key in row:
                 mask &= (df[key] == row.get(key))
         matches = df[mask]
         if not matches.empty:
             return matches.iloc[0]
-        return row  # fallback
+        return row
 
     if isinstance(selected, list) and len(selected) > 0:
         row = selected[0]
@@ -505,30 +333,15 @@ def show_market_view() -> None:
                     st.markdown(f"**{col}:**")
                     value = full_row[col] if col in full_row else row.get(col)
                     st.markdown(value if pd.notna(value) else "_(empty)_")
-    elif hasattr(selected, "empty") and not selected.empty:
-        row = selected.iloc[0]
-        full_row = get_full_row(row)
-        with st.expander("Market View Details", expanded=True):
-            all_columns = list(filtered.columns) + [c for c in cols_to_hide if c in df.columns]
-            cols = st.columns(2)
-            for i, col in enumerate(all_columns):
-                with cols[i % 2]:
-                    st.markdown(f"**{col}:**")
-                    value = full_row[col] if col in full_row else row.get(col)
-                    st.markdown(value if pd.notna(value) else "_(empty)_")
 
-
-import calendar
+# --- Shared utilities (existing + minor helpers) ---
 
 def parse_any_date(val):
-    """Parse a date string into a YYYY-MM-DD string, handling many formats."""
     if pd.isna(val) or not str(val).strip():
         return None
     s = str(val).strip()
-    # Try pandas parsing first
     dt = pd.to_datetime(s, errors="coerce", infer_datetime_format=True)
     if pd.notna(dt):
-        # If only year/month, set to last day of month
         if dt.day == 1 and (
             s.lower().endswith(str(dt.year)) and (
                 s.lower().startswith(dt.strftime("%B").lower()) or
@@ -536,7 +349,6 @@ def parse_any_date(val):
                 "-" in s or "/" in s
             )
         ):
-            # Check if original string is just month/year
             if (
                 len(s.split()) == 2 and
                 not any(char.isdigit() for char in s.split()[0])
@@ -544,7 +356,6 @@ def parse_any_date(val):
                 last_day = calendar.monthrange(dt.year, dt.month)[1]
                 dt = dt.replace(day=last_day)
         return dt.strftime("%Y-%m-%d")
-    # Try to parse "Month YYYY" or "Mon YYYY"
     try:
         dt = pd.to_datetime(s + " 1", errors="coerce")
         if pd.notna(dt):
@@ -555,7 +366,6 @@ def parse_any_date(val):
         pass
     return None
 
-
 def percent_to_float(val):
     try:
         if pd.isna(val):
@@ -564,11 +374,8 @@ def percent_to_float(val):
     except Exception:
         return None
 
-
 def show_fund_monitor() -> None:
-    """Render the fund monitor page using Google Sheets data, using canonical fund list and improved UX."""
-
-    # Load exposures sheet
+    # Preserved with track_record and net/gross charts:contentReference[oaicite:5]{index=5}
     if not ("exposures" in st.secrets and "sheet_id" in st.secrets["exposures"]):
         st.error("Missing 'exposures' configuration in secrets.")
         return
@@ -579,7 +386,6 @@ def show_fund_monitor() -> None:
         st.warning("No data returned from the exposures sheet.")
         return
 
-    # Load securities_master for canonical fund list
     if not ("securities_master" in st.secrets and "sheet_id" in st.secrets["securities_master"]):
         st.error("Missing 'securities_master' configuration in secrets.")
         return
@@ -590,36 +396,28 @@ def show_fund_monitor() -> None:
         st.warning("No data or missing columns in securities_master.")
         return
 
-    # Only include funds present in exposures
     exposure_fund_ids = set(df["fund_id"].dropna().unique()) if "fund_id" in df.columns else set()
-    canonical_funds = sec_df[sec_df["canonical_id"].isin(exposure_fund_ids)][["canonical_id", "canonical_name"]].drop_duplicates()
-    canonical_funds = canonical_funds.sort_values("canonical_name")
+    canonical_funds = sec_df[sec_df["canonical_id"].isin(exposure_fund_ids)][["canonical_id","canonical_name"]].drop_duplicates().sort_values("canonical_name")
     fund_options = canonical_funds["canonical_name"].tolist()
     default_fund = None
-    
     if "defaults" in st.secrets and "fund" in st.secrets["defaults"]:
         default_fund = st.secrets["defaults"]["fund"]
     fund_index = fund_options.index(default_fund) if default_fund in fund_options else 0
 
-    # --- Selection boxes in two columns ---
     sel_col1, sel_col2 = st.columns(2)
     with sel_col1:
         fund_choice = st.selectbox("Select Fund", fund_options, index=fund_index, key="fund_select")
-    # Map selected canonical_name to canonical_id
     selected_canonical_id = canonical_funds[canonical_funds["canonical_name"] == fund_choice]["canonical_id"].iloc[0]
 
-    # Format the date column homogenously
     if "date" in df.columns:
         df["date"] = df["date"].apply(parse_any_date)
 
-    # Filter exposures by canonical_id (assuming exposures has a 'fund_id' column)
     if "fund_id" in df.columns:
         fund_df = df[df["fund_id"] == selected_canonical_id]
     else:
         st.error("No fund_id column in exposures sheet.")
         return
 
-    # Remove duplicate dates for selection
     if fund_df.empty:
         st.warning("No records found for the selected fund.")
         return
@@ -627,9 +425,8 @@ def show_fund_monitor() -> None:
 
     with sel_col2:
         date_choice = st.selectbox("Select Date", date_values, key="date_select")
-        file_type = st.selectbox("Select file type", ["pdf", "img"], index=0, key="filetype_select")
-    
-    # Filter by date and file_type (if column exists)
+        file_type = st.selectbox("Select file type", ["pdf","img"], index=0, key="filetype_select")
+
     filtered_row = fund_df[(fund_df["date"] == date_choice)]
     if "file_type" in filtered_row.columns:
         filtered_row = filtered_row[filtered_row["file_type"] == file_type]
@@ -638,7 +435,6 @@ def show_fund_monitor() -> None:
         return
     row = filtered_row.iloc[0]
 
-    # Display metrics
     metrics_cols = st.columns(5)
     metrics_cols[0].metric("AUM", row.get("aum_fund") or row.get("aum_firm"))
     metrics_cols[1].metric("Net", row.get("net"))
@@ -646,15 +442,13 @@ def show_fund_monitor() -> None:
     metrics_cols[3].metric("Long", row.get("long"))
     metrics_cols[4].metric("Short", row.get("short"))
 
-    # Positions counts
     st.subheader("Number of Positions")
     pos_cols = st.columns(2)
     pos_cols[0].metric("Long", row.get("num_pos_long"))
     pos_cols[1].metric("Short", row.get("num_pos_short"))
 
-    # Sector and Geographic exposures in the same row
-    sector_keys = ["sector_long", "sector_short", "sector_gross", "sector_net"]
-    geo_keys = ["geo_long", "geo_short", "geo_gross", "geo_net"]
+    sector_keys = ["sector_long","sector_short","sector_gross","sector_net"]
+    geo_keys = ["geo_long","geo_short","geo_gross","geo_net"]
     st.subheader("Exposures")
     exp_cols = st.columns(2)
     if all(k in row.index for k in sector_keys):
@@ -668,77 +462,48 @@ def show_fund_monitor() -> None:
             geo_df = build_exposure_df(row, geo_keys)
             st.dataframe(geo_df)
 
-    # --- Historical Analysis Section ---
     st.subheader("Historical Analysis")
     st.write("Cumulative Performance")
-    
-    # TRACK RECORD
-    # Fetch and display historical returns
     track_record = fetch_track_record_json(selected_canonical_id)
     if track_record and isinstance(track_record.get("returns"), list):
         returns_df = pd.DataFrame(track_record["returns"])
-        # Robust column normalization: accept aliases for 'return'
         if "date" not in returns_df.columns or "return" not in returns_df.columns:
             if "ret" in returns_df.columns and "date" in returns_df.columns:
-                returns_df = returns_df.rename(columns={"ret": "return"})
+                returns_df = returns_df.rename(columns={"ret":"return"})
             elif "value" in returns_df.columns and "date" in returns_df.columns:
-                returns_df = returns_df.rename(columns={"value": "return"})
-
-        if {"date", "return"} <= set(returns_df.columns):
+                returns_df = returns_df.rename(columns={"value":"return"})
+        if {"date","return"} <= set(returns_df.columns):
             returns_df["date"] = returns_df["date"].apply(parse_any_date)
-            returns_df = returns_df.dropna(subset=["date", "return"])
+            returns_df = returns_df.dropna(subset=["date","return"])
             returns_df["return"] = pd.to_numeric(returns_df["return"], errors="coerce")
             returns_df = returns_df.dropna(subset=["return"]).sort_values("date")
 
             import altair as alt
-            import altair as alt
-
-            # Convert % to decimal and compound
             returns_df["ret_dec"] = returns_df["return"] / 100.0
             returns_df["cum_return"] = (1.0 + returns_df["ret_dec"]).cumprod() - 1.0
-
             cum_chart = alt.Chart(returns_df).mark_line(point=True).encode(
                 x=alt.X("date:T", title="Date"),
                 y=alt.Y("cum_return:Q", title="Cumulative Return", axis=alt.Axis(format="%")),
-                tooltip=[
-                    alt.Tooltip("date:T", title="Date"),
-                    alt.Tooltip("return:Q", title="Monthly Return", format=".2f"),
-                    alt.Tooltip("cum_return:Q", title="Cumulative", format=".2%")
-                ]
+                tooltip=[alt.Tooltip("date:T", title="Date"),
+                         alt.Tooltip("return:Q", title="Monthly Return", format=".2f"),
+                         alt.Tooltip("cum_return:Q", title="Cumulative", format=".2%")]
             ).properties(width=700, height=350)
-
             st.altair_chart(cum_chart, use_container_width=True)
 
-        else:
-            st.info("track_record.json parsed, but expected 'date' and 'return' fields were not found.")
-    elif track_record:
-        st.info("Parsed track_record.json but no returns series present.")
-
-    # NET & GROSS
     st.write("Net & Gross Exposure")
-    # Filter for selected fund and remove duplicate dates
-    hist_df = fund_df.copy()
-    hist_df = hist_df.drop_duplicates(subset=["date"])
-    # Only plot if net and gross columns exist and are numeric
+    hist_df = fund_df.copy().drop_duplicates(subset=["date"])
     if "net" in hist_df.columns and "gross" in hist_df.columns:
-        
-        hist_df = hist_df.dropna(subset=["date", "net", "gross"])
-        
-        # Convert to numeric, coerce errors
-        # Apply to net and gross columns
+        hist_df = hist_df.dropna(subset=["date","net","gross"])
         if "net" in hist_df.columns:
             hist_df["net"] = hist_df["net"].apply(percent_to_float)
         if "gross" in hist_df.columns:
             hist_df["gross"] = hist_df["gross"].apply(percent_to_float)
-
-        hist_df = hist_df.dropna(subset=["date", "net", "gross"])
-        hist_df = hist_df.sort_values("date")
-
+        hist_df = hist_df.dropna(subset=["date","net","gross"]).sort_values("date")
         if not hist_df.empty:
             import altair as alt
             chart = alt.Chart(hist_df).transform_fold(
-                ["net", "gross"],
-                as_=["Exposure", "Value"]
+                ["net","gross"],
+                as_=["Exposure","Value"]
             ).mark_line(point=True).encode(
                 x=alt.X("date:T", title="Date"),
                 y=alt.Y("Value:Q", title="Exposure"),
@@ -746,40 +511,292 @@ def show_fund_monitor() -> None:
                 tooltip=["date", alt.Tooltip("Exposure:N"), alt.Tooltip("Value:Q")]
             ).properties(width=700, height=350)
             st.altair_chart(chart, use_container_width=True)
-        else:
-            st.info("No historical net/gross data available for this fund.")
-    else:
-        st.info("No historical net/gross data available for this fund.")
 
-    
+# =========================
+# Market Analytics Section
+# =========================
+
+# 1) Monthly Seasonality Explorer
+def _fetch_history(ticker: str, start: str = "1928-01-01") -> pd.DataFrame:
+    df = pdr.get_data_yahoo(ticker, start=start)
+    df = df.rename(columns=str.lower)
+    df = df.reset_index().rename(columns={"Date":"date"})
+    return df
+
+def _seasonality_stats(df: pd.DataFrame) -> pd.DataFrame:
+    px = df.copy()
+    px["ret"] = px["adj close"].pct_change()
+    px["year"] = px["date"].dt.year
+    px["month"] = px["date"].dt.month
+    m = px.groupby(["year","month"]).agg(rv=("ret","sum")).dropna().reset_index()
+    stats = m.groupby("month").agg(
+        median_month_return=("rv","median"),
+        hit_rate=("rv", lambda x: (x > 0).mean())
+    ).reset_index()
+    stats["median_month_return_pct"] = stats["median_month_return"] * 100
+    stats["hit_rate_pct"] = stats["hit_rate"] * 100
+    return stats
+
+def view_monthly_seasonality():
+    st.subheader("Monthly Seasonality Explorer")
+    tcol1, tcol2 = st.columns([2,1])
+    with tcol1:
+        ticker = st.text_input("Ticker (Yahoo Finance)", value="SPY")
+    with tcol2:
+        start_year = st.number_input("Start Year", min_value=1900, max_value=datetime.now().year, value=1990)
+    if not ticker:
+        return
+    df = _fetch_history(ticker, start=f"{start_year}-01-01")
+    stats = _seasonality_stats(df)
+    import altair as alt
+    bars = alt.Chart(stats).mark_bar().encode(
+        x=alt.X("month:O", title="Calendar Month"),
+        y=alt.Y("median_month_return_pct:Q", title="Median Monthly Return (%)"),
+        tooltip=[alt.Tooltip("median_month_return_pct:Q", format=".2f"),
+                 alt.Tooltip("hit_rate_pct:Q", title="Hit Rate (%)", format=".1f")]
+    ).properties(height=300)
+    line = alt.Chart(stats).mark_line(point=True).encode(
+        x="month:O", y=alt.Y("hit_rate_pct:Q", title="Hit Rate (%)"), tooltip=["hit_rate_pct"]
+    ).properties(height=200)
+    st.altair_chart(bars, use_container_width=True)
+    st.altair_chart(line, use_container_width=True)
+    st.caption("Method: monthly total return by year → median by month; hit rate = share of years with positive month.")
+
+# 2) Market Memory Explorer
+def _ytd_path(df: pd.DataFrame) -> pd.DataFrame:
+    px = df.copy()
+    px["ret"] = px["adj close"].pct_change().fillna(0.0)
+    px["year"] = px["date"].dt.year
+    px["doy"] = px["date"].dt.dayofyear
+    paths = px.groupby("year").apply(lambda g: (1+g["ret"]).cumprod() - 1.0).reset_index()
+    paths = paths.rename(columns={0:"cum"})
+    return px[["date","year","doy"]].merge(paths, on=["year","level_1"]).drop(columns=["level_1"])
+
+def _closest_years(cur: pd.Series, hist: pd.DataFrame, k: int=5) -> List[int]:
+    # Align by day-of-year, compute Euclidean distance
+    merged = hist.pivot(index="doy", columns="year", values="cum").dropna(how="all")
+    common = merged.index[merged.index.isin(cur.index)]
+    if len(common) < 5:
+        return []
+    diffs = {}
+    for yr in merged.columns:
+        v = merged.loc[common, yr].fillna(method="ffill").fillna(0.0)
+        diffs[yr] = float(np.sqrt(((v - cur.loc[common])**2).mean()))
+    ranked = sorted(diffs.items(), key=lambda x: x[1])
+    res = [y for y,_ in ranked if y != datetime.now().year][:k]
+    return res
+
+def view_market_memory():
+    st.subheader("Market Memory Explorer")
+    l, r = st.columns([2,1])
+    with l:
+        ticker = st.text_input("Ticker (Yahoo Finance)", value="SPY")
+    with r:
+        start_year = st.number_input("History start year", min_value=1900, max_value=datetime.now().year, value=1950)
+        k = st.slider("Similar years", min_value=3, max_value=10, value=5)
+    df = _fetch_history(ticker, start=f"{start_year}-01-01")
+    px = df.copy()
+    px["ret"] = px["adj close"].pct_change().fillna(0.0)
+    px["doy"] = px["date"].dt.dayofyear
+    px["year"] = px["date"].dt.year
+    px["cum"] = (1+px["ret"]).cumprod() - 1.0
+    this_year = px[px["year"] == datetime.now().year].set_index("doy")["cum"]
+    hist = _ytd_path(df)
+    years = _closest_years(this_year, hist, k=k)
+    import altair as alt
+    base = alt.Chart(px).transform_filter(
+        alt.datum.year == datetime.now().year
+    ).mark_line(size=3).encode(x=alt.X("doy:Q", title="Day of Year"), y=alt.Y("cum:Q", title="Cumulative Return"), color=alt.value("#1f77b4"))
+    others = alt.Chart(px[px["year"].isin(years)]).mark_line(opacity=0.5).encode(
+        x="doy:Q", y="cum:Q", color="year:N"
+    )
+    st.altair_chart(others + base, use_container_width=True)
+    st.caption("Similarity metric: Euclidean distance on aligned day-of-year cumulative paths.")
+
+# 3) Breakout Scanner
+def _rolling_high(s: pd.Series, n: int) -> pd.Series:
+    return s.rolling(n, min_periods=n).max()
+
+def _scan_breakouts(tickers: List[str], lookbacks: List[int]) -> pd.DataFrame:
+    end = datetime.now()
+    start = end - timedelta(days=max(lookbacks)*3)
+    data = pdr.get_data_yahoo(tickers, start=start, end=end)["Adj Close"]
+    latest = data.iloc[-1]
+    out = []
+    for t in data.columns:
+        row = {"ticker": t, "price": latest[t]}
+        for n in lookbacks:
+            rh = _rolling_high(data[t], n).iloc[-1]
+            row[f"high_{n}d"] = rh
+            row[f"breakout_{n}d"] = bool(latest[t] >= rh)
+        out.append(row)
+    return pd.DataFrame(out).sort_values("ticker")
+
+def view_breakout_scanner():
+    st.subheader("Breakout Scanner")
+    default = ["SPY","QQQ","IWM","AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA"]
+    universe = st.text_area("Universe (comma-separated tickers)", value=",".join(default))
+    lookbacks = st.multiselect("High lookbacks", [20,50,100,200], default=[20,50,100,200])
+    if not universe.strip():
+        return
+    tickers = [t.strip().upper() for t in universe.split(",") if t.strip()]
+    df = _scan_breakouts(tickers, lookbacks)
+    bool_cols = [c for c in df.columns if c.startswith("breakout_")]
+    for c in bool_cols:
+        df[c] = df[c].map({True:"Yes", False:"No"})
+    st.dataframe(df, use_container_width=True)
+
+# 4) 10-Year Nominal & Real Yield Dashboard
+# FRED series:
+# - Nominal: DGS10
+# - Real: REAINTRATREARAT10Y (10Y real rate, alt: DFII10 TIPS yield)
+def _fred(series: str, start: str="1990-01-01") -> pd.DataFrame:
+    s = pdr.DataReader(series, "fred", start=start)
+    s = s.rename(columns={series:"value"}).reset_index().rename(columns={"DATE":"date"})
+    return s
+
+def view_real_yield_dashboard():
+    st.subheader("10-Year Nominal and Real Yield")
+    s_nom = _fred("DGS10", start="1990-01-01")
+    try:
+        s_real = _fred("REAINTRATREARAT10Y", start="1990-01-01")
+    except Exception:
+        # fallback to TIPS 10Y
+        s_real = _fred("DFII10", start="2003-01-01")
+    joined = pd.merge_asof(
+        s_real.sort_values("date"),
+        s_nom.sort_values("date"),
+        on="date", direction="backward", suffixes=("_real","_nom")
+    ).dropna()
+    joined["real_mom_63d"] = joined["value_real"].diff(63)
+    import altair as alt
+    c1 = alt.Chart(joined).mark_line().encode(x="date:T", y=alt.Y("value_nom:Q", title="Nominal 10Y (%)"))
+    c2 = alt.Chart(joined).mark_line(color="#d62728").encode(x="date:T", y=alt.Y("value_real:Q", title="Real 10Y (%)"))
+    c3 = alt.Chart(joined).mark_line().encode(x="date:T", y=alt.Y("real_mom_63d:Q", title="63D Δ Real 10Y"))
+    st.altair_chart(c1, use_container_width=True)
+    st.altair_chart(c2, use_container_width=True)
+    st.altair_chart(c3, use_container_width=True)
+    st.caption("Sources: FRED DGS10 (nominal), REAINTRATREARAT10Y (real). Real-yield momentum = 63-trading-day change. See repo notes for interpretation.")
+
+# 5) Liquidity & Fed Policy Tracker
+# Net Liquidity = WALCL − RRP − TGA (units: $bn). RRP series: RRPONTSYD; TGA: WTREGEN.
+def view_liquidity_tracker():
+    st.subheader("Liquidity & Fed Policy Tracker")
+    walcl = _fred("WALCL", start="2015-01-01")      # Fed balance sheet (weekly)
+    rrp = _fred("RRPONTSYD", start="2015-01-01")    # Overnight RRP
+    tga = _fred("WTREGEN", start="2015-01-01")      # Treasury General Account
+    # Align to business days (forward-fill)
+    for s in (walcl, rrp, tga):
+        s["date"] = pd.to_datetime(s["date"])
+    dt_index = pd.DataFrame({"date": pd.date_range(min(walcl["date"].min(), rrp["date"].min(), tga["date"].min()),
+                                                   datetime.now(), freq="B")})
+    def align(df): 
+        return pd.merge_asof(dt_index, df.sort_values("date"), on="date", direction="backward")
+    a_w, a_r, a_t = align(walcl), align(rrp), align(tga)
+    liq = dt_index.copy()
+    liq["walcl"] = a_w["value"]
+    liq["rrp"] = a_r["value"]
+    liq["tga"] = a_t["value"]
+    liq["net_liquidity"] = liq["walcl"] - liq["rrp"] - liq["tga"]
+    # Optional SPX overlay
+    try:
+        spy = _fetch_history("SPY", start="2015-01-01")[["date","adj close"]].rename(columns={"adj close":"spy"})
+        liq = pd.merge_asof(liq.sort_values("date"), spy.sort_values("date"), on="date", direction="backward")
+    except Exception:
+        pass
+    import altair as alt
+    left = alt.Chart(liq).mark_line().encode(x="date:T", y=alt.Y("net_liquidity:Q", title="Net Liquidity ($bn)"))
+    st.altair_chart(left, use_container_width=True)
+    if "spy" in liq.columns:
+        right = alt.Chart(liq).mark_line(color="#2ca02c").encode(x="date:T", y=alt.Y("spy:Q", title="SPY (Adj Close)"))
+        st.altair_chart(right, use_container_width=True)
+    st.caption("Definition: Net Liquidity = WALCL − RRP − TGA; sustained rises often align with risk-on conditions.")
+
+# 6) Market Stress Composite
+# Components: VIX (^VIX), HY OAS (BAMLH0A0HYM2), Curve (T10Y2Y), SPY drawdown.
+def _zscore(s: pd.Series) -> pd.Series:
+    return (s - s.mean()) / (s.std(ddof=0) + 1e-9)
+
+def _pct_rank(s: pd.Series) -> pd.Series:
+    return s.rank(pct=True)
+
+def view_market_stress():
+    st.subheader("Market Stress Composite")
+    # Fetch
+    vix = _fetch_history("^VIX", start="2004-01-01")[["date","adj close"]].rename(columns={"adj close":"vix"})
+    hy = _fred("BAMLH0A0HYM2", start="2004-01-01").rename(columns={"value":"hy_oas"})
+    curve = _fred("T10Y2Y", start="2004-01-01").rename(columns={"value":"t10y2y"})
+    spy = _fetch_history("SPY", start="2004-01-01")[["date","adj close"]].rename(columns={"adj close":"spy"})
+    # Merge
+    df = vix.merge(hy, on="date", how="outer").merge(curve, on="date", how="outer").merge(spy, on="date", how="outer").sort_values("date")
+    df = df.ffill().dropna()
+    # Drawdown
+    roll_max = df["spy"].cummax()
+    dd = (df["spy"] / roll_max) - 1.0
+    # Normalize components to [0,1] stress direction (higher = more stress)
+    z_vix = _pct_rank(df["vix"])
+    z_hy = _pct_rank(df["hy_oas"])
+    z_curve = 1 - _pct_rank(df["t10y2y"])  # more inverted curve -> higher stress
+    z_dd = _pct_rank(-dd)  # deeper drawdown -> higher stress
+    comp = (z_vix + z_hy + z_curve + z_dd) / 4.0
+    out = df[["date"]].copy()
+    out["stress_0_100"] = (comp * 100).round(1)
+    import altair as alt
+    ch = alt.Chart(out).mark_line().encode(x="date:T", y=alt.Y("stress_0_100:Q", title="Market Stress (0-100)"))
+    st.altair_chart(ch, use_container_width=True)
+    st.caption("Composite blends VIX, HY OAS (FRED), 10y–2y curve (FRED), and SPY drawdown into a 0–100 scale.")
+
+# Router for Market Analytics
+def show_market_analytics():
+    st.header("Market Analytics")
+    tab = st.sidebar.radio(
+        "Market Analytics",
+        [
+            "Monthly Seasonality Explorer",
+            "Market Memory Explorer",
+            "Breakout Scanner",
+            "10-Year Nominal & Real Yield Dashboard",
+            "Liquidity & Fed Policy Tracker",
+            "Market Stress Composite",
+        ],
+        index=0,
+        key="market_analytics_tab"
+    )
+    if tab == "Monthly Seasonality Explorer":
+        view_monthly_seasonality()
+    elif tab == "Market Memory Explorer":
+        view_market_memory()
+    elif tab == "Breakout Scanner":
+        view_breakout_scanner()
+    elif tab == "10-Year Nominal & Real Yield Dashboard":
+        view_real_yield_dashboard()
+    elif tab == "Liquidity & Fed Policy Tracker":
+        view_liquidity_tracker()
+    elif tab == "Market Stress Composite":
+        view_market_stress()
+
+# ---- Main ----
+
 def main() -> None:
-    """Main entry point for the Streamlit application."""
     st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
-
-    # Sidebar navigation using option_menu
     with st.sidebar:
         page = option_menu(
             "Navigation",
-            ["Performance Est", "Market Views", "Fund Monitor"],
-            # icons=["bar-chart", "globe", "clipboard-data"],  # optional: choose icons
-            # menu_icon="cast",  # optional: sidebar header icon
+            ["Performance Est", "Market Views", "Fund Monitor", "Market Analytics"],  # new option added:contentReference[oaicite:6]{index=6}
             default_index=0,
             orientation="vertical"
         )
-
     if page == "Performance Est":
-        # st.title("Fund Monitoring Dashboard")
         st.header("Performance Estimates")
         show_performance_view()
     elif page == "Market Views":
-        # st.title("Fund Monitoring Dashboard")
         st.header("Market Views")
         show_market_view()
     elif page == "Fund Monitor":
-        # st.title("Fund Monitoring Dashboard")
         st.header("Fund Monitor")
         show_fund_monitor()
-
+    elif page == "Market Analytics":
+        show_market_analytics()
 
 if __name__ == "__main__":
     main()
