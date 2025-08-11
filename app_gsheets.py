@@ -322,6 +322,8 @@ def fetch_track_record_json(fund_id: str) -> dict | None:
     return _normalize_track_record(obj)
 
 
+############################################################################################################
+
 
 def show_performance_view() -> None:
     """Render the performance overview page using Google Sheets data, with asset class filter."""
@@ -687,13 +689,26 @@ def show_fund_monitor() -> None:
             returns_df = returns_df.dropna(subset=["date", "return"])
             returns_df["return"] = pd.to_numeric(returns_df["return"], errors="coerce")
             returns_df = returns_df.dropna(subset=["return"]).sort_values("date")
+
             import altair as alt
-            ret_chart = alt.Chart(returns_df).mark_line(point=True).encode(
+            import altair as alt
+
+            # Convert % to decimal and compound
+            returns_df["ret_dec"] = returns_df["return"] / 100.0
+            returns_df["cum_return"] = (1.0 + returns_df["ret_dec"]).cumprod() - 1.0
+
+            cum_chart = alt.Chart(returns_df).mark_line(point=True).encode(
                 x=alt.X("date:T", title="Date"),
-                y=alt.Y("return:Q", title="Return"),
-                tooltip=["date", "return"]
+                y=alt.Y("cum_return:Q", title="Cumulative Return", axis=alt.Axis(format="%")),
+                tooltip=[
+                    alt.Tooltip("date:T", title="Date"),
+                    alt.Tooltip("return:Q", title="Monthly Return", format=".2f"),
+                    alt.Tooltip("cum_return:Q", title="Cumulative", format=".2%")
+                ]
             ).properties(width=700, height=350)
-            st.altair_chart(ret_chart, use_container_width=True)
+
+            st.altair_chart(cum_chart, use_container_width=True)
+
         else:
             st.info("track_record.json parsed, but expected 'date' and 'return' fields were not found.")
     elif track_record:
