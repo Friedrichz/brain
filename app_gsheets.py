@@ -875,15 +875,32 @@ def percent_to_float(val):
         return None
 
 # ADD near other helpers (below percent_to_float)
+import re
 
 def _split_bullets(text: str) -> list[str]:
     s = ("" if text is None else str(text)).strip()
     if not s:
         return []
-    parts = [p.strip("•- \t") for p in s.splitlines() if p.strip()]
-    if len(parts) <= 1 and "•" in s:
-        parts = [p.strip("•- \t") for p in s.split("•") if p.strip()]
-    return [p for p in parts if p]
+
+    # Normalize common separators into line breaks
+    s = s.replace("•", "\n• ")
+    s = re.sub(r"\s+(\d{1,2}[\.\)])\s+", r"\n\1 ", s)  # "1. ..." or "2) ..."
+
+    # Split into lines and strip leading list tokens
+    lines = [ln for ln in (x.strip() for x in s.splitlines()) if ln]
+    items = []
+    for ln in lines:
+        ln = re.sub(r"^\s*(?:•|-|\(?\d{1,3}[\.\)])\s*", "", ln).strip()
+        if ln:
+            items.append(ln)
+
+    # Fallback: still one blob with inline numbering
+    if len(items) == 1 and re.search(r"\b\d{1,2}[\.\)]\s+", items[0]):
+        parts = re.split(r"\s(?=\d{1,2}[\.\)]\s+)", items[0])
+        items = [re.sub(r"^\s*(?:\(?\d{1,2}[\.\)])\s*", "", p).strip() for p in parts]
+        items = [p for p in items if p]
+
+    return items
 
 # replace your helper signature
 def _format_exposure_table(df: pd.DataFrame) -> Styler:
@@ -896,8 +913,6 @@ def _format_exposure_table(df: pd.DataFrame) -> Styler:
     if net_cols:
         styler = styler.set_properties(subset=pd.IndexSlice[:, [net_cols[-1]]], **{"font-weight": "bold"})
     return styler
-
-
 
 def show_fund_monitor() -> None:
     # Preserved with track_record and net/gross charts:contentReference[oaicite:5]{index=5}
@@ -971,25 +986,30 @@ def show_fund_monitor() -> None:
     sum_cols = st.columns([3, 1])
 
     with sum_cols[0]:
-        bullets = []
+        bullets, repdate = [], None
         try:
             letters = _load_letters()
             if not letters.empty and {"fund_id", "report_date", "letter_summary_5_bullets"} <= set(letters.columns):
                 fl = letters[letters["fund_id"] == selected_canonical_id].copy()
                 fl["report_date"] = pd.to_datetime(fl["report_date"], errors="coerce")
-                if not fl.empty and fl["report_date"].notna().any():
+                if fl["report_date"].notna().any():
                     latest_rd = fl["report_date"].max()
-                    latest_rows = fl[(fl["report_date"] == latest_rd)]
+                    latest_rows = fl[fl["report_date"] == latest_rd]
                     latest_rows = latest_rows[latest_rows["letter_summary_5_bullets"].astype(str).str.strip().ne("")]
                     if not latest_rows.empty:
-                        bullets = _split_bullets(latest_rows.iloc[0]["letter_summary_5_bullets"])
+                        cell = latest_rows.iloc[0]["letter_summary_5_bullets"]
+                        bullets = _split_bullets(cell)
+                        repdate = pd.to_datetime(latest_rd, errors="coerce")
         except Exception:
-            bullets = []
+            bullets, repdate = [], None
 
-        st.markdown("**Latest letter — 5 bullets**")
+        if repdate is not None:
+            st.markdown(f"**Letter as of: {repdate.strftime('%Y-%m-%d')}**")
+        else:
+            st.markdown("**Letter as of:** _N/A_")
+
         if bullets:
-            for b in bullets:
-                st.markdown(f"- {b}")
+            st.markdown("\n".join(f"- {b}" for b in bullets))
         else:
             st.markdown("_No summary available for the latest letter._")
 
