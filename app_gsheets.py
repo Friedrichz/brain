@@ -484,20 +484,19 @@ def _return_slice(px: pd.DataFrame, when: str) -> pd.Series:
     return pd.Series(dtype=float)
 
 def _attach_return_columns(df: pd.DataFrame, ticker_col: str = "position_ticker") -> pd.DataFrame:
+    # Only MTD% and YTD%
     if df.empty or ticker_col not in df.columns:
-        for c in ["1d %","1w %","MTD %","YTD %"]:
+        for c in ["MTD %","YTD %"]:
             df[c] = None
         return df
 
     tickers = [t for t in df[ticker_col].astype(str).str.upper().tolist() if t and t != "NAN"]
     px = _yahoo_history_panel(tickers)
     if px.empty:
-        for c in ["1d %","1w %","MTD %","YTD %"]:
+        for c in ["MTD %","YTD %"]:
             df[c] = None
         return df
 
-    r1d  = _return_slice(px, "1d")
-    r1w  = _return_slice(px, "1w")
     rmtd = _return_slice(px, "mtd")
     rytd = _return_slice(px, "ytd")
 
@@ -512,11 +511,10 @@ def _attach_return_columns(df: pd.DataFrame, ticker_col: str = "position_ticker"
         except Exception:
             return None
 
-    out["1d %"]  = out[ticker_col].apply(lambda t: _map(r1d, t))
-    out["1w %"]  = out[ticker_col].apply(lambda t: _map(r1w, t))
     out["MTD %"] = out[ticker_col].apply(lambda t: _map(rmtd, t))
     out["YTD %"] = out[ticker_col].apply(lambda t: _map(rytd, t))
     return out
+
 
 # ======== REPLACE show_market_view WITH THIS ========
 
@@ -570,8 +568,8 @@ def show_market_view() -> None:
             metrics = metrics.rename(columns={"position_ticker": "Position Ticker"})
 
             ordered_cols = [
-                "Fund Name","Position Name","Position Ticker","Position Sector","Position Weight (%)","Report Date",
-                "1d %","1w %","MTD %","YTD %"
+                "Fund Name","Position Name","Position Ticker","Position Sector",
+                "Position Weight (%)","Report Date","MTD %","YTD %"
             ]
             metrics = metrics[ordered_cols]
 
@@ -582,8 +580,6 @@ def show_market_view() -> None:
                 column_config={
                     "Report Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD", step="day"),
                     "Position Weight (%)": st.column_config.NumberColumn(format="%.2f%%"),
-                    "1d %":  st.column_config.NumberColumn(format="%.2f%%"),
-                    "1w %":  st.column_config.NumberColumn(format="%.2f%%"),
                     "MTD %": st.column_config.NumberColumn(format="%.2f%%"),
                     "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
                 },
@@ -621,9 +617,11 @@ def show_market_view() -> None:
         metrics = _attach_return_columns(metrics, ticker_col="position_ticker").rename(columns={"position_ticker":"Position Ticker"})
         metrics = metrics.sort_values("Report Date", ascending=False)
 
+        metrics = metrics.sort_values("Report Date", ascending=False)
+
         ordered_cols = [
             "Fund Name","Report Date","Position Name","Position Ticker","Position Sector",
-            "Position Thesis Summary","Position Duration View","1d %","1w %","MTD %","YTD %"
+            "Position Thesis Summary","Position Duration View","MTD %","YTD %"
         ]
         metrics = metrics[ordered_cols]
 
@@ -633,8 +631,6 @@ def show_market_view() -> None:
             hide_index=True,
             column_config={
                 "Report Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD", step="day"),
-                "1d %":  st.column_config.NumberColumn(format="%.2f%%"),
-                "1w %":  st.column_config.NumberColumn(format="%.2f%%"),
                 "MTD %": st.column_config.NumberColumn(format="%.2f%%"),
                 "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
             },
