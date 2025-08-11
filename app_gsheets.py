@@ -39,6 +39,14 @@ from googleapiclient.errors import HttpError
 
 import matplotlib.pyplot as plt
 
+# near other imports
+from typing import Any
+try:
+    from pandas.io.formats.style import Styler
+except Exception:  # pandas build without exposed Styler path
+    Styler = Any  # type: ignore
+
+
 # --- Drive scopes / helpers (existing) ---
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
@@ -877,19 +885,18 @@ def _split_bullets(text: str) -> list[str]:
         parts = [p.strip("•- \t") for p in s.split("•") if p.strip()]
     return [p for p in parts if p]
 
-def _format_exposure_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
+# replace your helper signature
+def _format_exposure_table(df: pd.DataFrame) -> Styler:
     out = df.copy()
-    # a) strip quotes from index labels
-    out.index = out.index.astype(str).str.  strip().str.strip('"').str.strip("'")
-    # b) coerce to numeric for percent formatting
+    out.index = out.index.astype(str).str.strip().str.strip('"').str.strip("'")
     for c in out.columns:
         out[c] = pd.to_numeric(out[c], errors="coerce")
-    # c) bold the last *_net column
     net_cols = [c for c in out.columns if c.endswith("_net")]
     styler = out.style.format("{:.2f}%")
     if net_cols:
         styler = styler.set_properties(subset=pd.IndexSlice[:, [net_cols[-1]]], **{"font-weight": "bold"})
     return styler
+
 
 
 def show_fund_monitor() -> None:
