@@ -458,76 +458,128 @@ def show_market_view() -> None:
         "Source Explorer"
     ])
 
-# ---- Tab 1: Fund Manager Insights ----
-with tabs[0]:
-    df = letters.copy()
-    if "macro_view_category" not in df.columns:
-        st.warning("Column 'macro_view_category' not found in letters.")
-        df = pd.DataFrame(columns=["Macro Category","Fund Name","Report Date","Macro View Summary","Macro View Direction"])
-    else:
-        df = df[_nonnull_mask(df["macro_view_category"])].copy()
-        for c in ["macro_view_summary","macro_view_direction"]:
-            if c not in df.columns:
-                df[c] = None
-        df = df[["macro_view_category","fund_name","report_date","macro_view_summary","macro_view_direction"]]
-        df = _parse_report_date(df, "report_date")
-        df["report_date"] = pd.to_datetime(df["report_date"], errors="coerce")
-        df = df.rename(columns={
-            "macro_view_category": "Macro Category",
-            "fund_name": "Fund Name",
-            "report_date": "Report Date",
-            "macro_view_summary": "Macro View Summary",
-            "macro_view_direction": "Macro View Direction",
-        }).sort_values("Report Date", ascending=False)
+    # ---- Tab 1: Fund Manager Insights ----
+    with tabs[0]:
+        df = letters.copy()
+        if "macro_view_category" not in df.columns:
+            st.warning("Column 'macro_view_category' not found in letters.")
+            df = pd.DataFrame(columns=["Macro Category","Fund Name","Report Date","Macro View Summary","Macro View Direction"])
+        else:
+            df = df[_nonnull_mask(df["macro_view_category"])].copy()
+            for c in ["macro_view_summary","macro_view_direction"]:
+                if c not in df.columns:
+                    df[c] = None
+            df = df[["macro_view_category","fund_name","report_date","macro_view_summary","macro_view_direction"]]
+            df = _parse_report_date(df, "report_date")
+            df["report_date"] = pd.to_datetime(df["report_date"], errors="coerce")
+            df = df.rename(columns={
+                "macro_view_category": "Macro Category",
+                "fund_name": "Fund Name",
+                "report_date": "Report Date",
+                "macro_view_summary": "Macro View Summary",
+                "macro_view_direction": "Macro View Direction",
+            }).sort_values("Report Date", ascending=False)
 
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Report Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD", step="day"),
-        },
-    )
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Report Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD", step="day"),
+            },
+        )
 
-# ---- Tab 2: Latest Fund Positions ----
-with tabs[1]:
-    df = letters.copy()
-    for col in ["position_ticker","position_weight_percent"]:
-        if col not in df.columns:
-            df[col] = None
-    mask = _nonnull_mask(df["position_ticker"]) & _nonnull_mask(df["position_weight_percent"])
-    df = df[mask].copy()
+    # ---- Tab 2: Latest Fund Positions ----
+    with tabs[1]:
+        df = letters.copy()
+        for col in ["position_ticker","position_weight_percent"]:
+            if col not in df.columns:
+                df[col] = None
+        mask = _nonnull_mask(df["position_ticker"]) & _nonnull_mask(df["position_weight_percent"])
+        df = df[mask].copy()
 
-    if df.empty:
-        st.info("No rows with non-empty position_ticker and position_weight_percent.")
-    else:
-        df = _parse_report_date(df, "report_date")
-        df["report_date"] = pd.to_datetime(df["report_date"], errors="coerce")
-        latest = df.groupby("fund_name")["report_date"].transform("max")
-        df = df[df["report_date"] == latest].copy()
+        if df.empty:
+            st.info("No rows with non-empty position_ticker and position_weight_percent.")
+        else:
+            df = _parse_report_date(df, "report_date")
+            df["report_date"] = pd.to_datetime(df["report_date"], errors="coerce")
+            latest = df.groupby("fund_name")["report_date"].transform("max")
+            df = df[df["report_date"] == latest].copy()
 
-        for col in ["position_name","position_sector"]:
+            for col in ["position_name","position_sector"]:
+                if col not in df.columns:
+                    df[col] = None
+
+            view = df[[
+                "fund_name","position_name","position_ticker","position_sector","position_weight_percent","report_date"
+            ]].rename(columns={
+                "fund_name":"Fund Name",
+                "position_name":"Position Name",
+                "position_ticker":"Position Ticker",
+                "position_sector":"Position Sector",
+                "position_weight_percent":"Position Weight (%)",
+                "report_date":"Report Date"
+            }).sort_values(["Fund Name","Position Weight (%)"], ascending=[True, False])
+
+            metrics = view.rename(columns={"Position Ticker": "position_ticker"})
+            metrics = _attach_return_columns(metrics, ticker_col="position_ticker")
+            metrics = metrics.rename(columns={"position_ticker": "Position Ticker"})
+
+            ordered_cols = [
+                "Fund Name","Position Name","Position Ticker","Position Sector","Position Weight (%)","Report Date",
+                "1d %","1w %","MTD %","YTD %"
+            ]
+            metrics = metrics[ordered_cols]
+
+            st.dataframe(
+                metrics,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Report Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD", step="day"),
+                    "Position Weight (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                    "1d %":  st.column_config.NumberColumn(format="%.2f%%"),
+                    "1w %":  st.column_config.NumberColumn(format="%.2f%%"),
+                    "MTD %": st.column_config.NumberColumn(format="%.2f%%"),
+                    "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
+                },
+            )
+
+    # ---- Tab 3: Fund Manager Investment Thesis ----
+    with tabs[2]:
+        df = letters.copy()
+        for col in ["position_thesis_summary","position_ticker"]:
+            if col not in df.columns:
+                df[col] = None
+        mask = _nonnull_mask(df["position_thesis_summary"]) & _nonnull_mask(df["position_ticker"])
+        df = df[mask].copy()
+
+        for col in ["position_name","position_sector","position_duration_view"]:
             if col not in df.columns:
                 df[col] = None
 
+        df = _parse_report_date(df, "report_date")
+        df["report_date"] = pd.to_datetime(df["report_date"], errors="coerce")
+
         view = df[[
-            "fund_name","position_name","position_ticker","position_sector","position_weight_percent","report_date"
+            "fund_name","report_date","position_name","position_ticker","position_sector","position_thesis_summary","position_duration_view"
         ]].rename(columns={
             "fund_name":"Fund Name",
+            "report_date":"Report Date",
             "position_name":"Position Name",
             "position_ticker":"Position Ticker",
             "position_sector":"Position Sector",
-            "position_weight_percent":"Position Weight (%)",
-            "report_date":"Report Date"
-        }).sort_values(["Fund Name","Position Weight (%)"], ascending=[True, False])
+            "position_thesis_summary":"Position Thesis Summary",
+            "position_duration_view":"Position Duration View"
+        })
 
-        metrics = view.rename(columns={"Position Ticker": "position_ticker"})
-        metrics = _attach_return_columns(metrics, ticker_col="position_ticker")
-        metrics = metrics.rename(columns={"position_ticker": "Position Ticker"})
+        metrics = view.rename(columns={"Position Ticker":"position_ticker"})
+        metrics = _attach_return_columns(metrics, ticker_col="position_ticker").rename(columns={"position_ticker":"Position Ticker"})
+        metrics = metrics.sort_values("Report Date", ascending=False)
 
         ordered_cols = [
-            "Fund Name","Position Name","Position Ticker","Position Sector","Position Weight (%)","Report Date",
-            "1d %","1w %","MTD %","YTD %"
+            "Fund Name","Report Date","Position Name","Position Ticker","Position Sector",
+            "Position Thesis Summary","Position Duration View","1d %","1w %","MTD %","YTD %"
         ]
         metrics = metrics[ordered_cols]
 
@@ -537,64 +589,12 @@ with tabs[1]:
             hide_index=True,
             column_config={
                 "Report Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD", step="day"),
-                "Position Weight (%)": st.column_config.NumberColumn(format="%.2f%%"),
                 "1d %":  st.column_config.NumberColumn(format="%.2f%%"),
                 "1w %":  st.column_config.NumberColumn(format="%.2f%%"),
                 "MTD %": st.column_config.NumberColumn(format="%.2f%%"),
                 "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
             },
         )
-
-# ---- Tab 3: Fund Manager Investment Thesis ----
-with tabs[2]:
-    df = letters.copy()
-    for col in ["position_thesis_summary","position_ticker"]:
-        if col not in df.columns:
-            df[col] = None
-    mask = _nonnull_mask(df["position_thesis_summary"]) & _nonnull_mask(df["position_ticker"])
-    df = df[mask].copy()
-
-    for col in ["position_name","position_sector","position_duration_view"]:
-        if col not in df.columns:
-            df[col] = None
-
-    df = _parse_report_date(df, "report_date")
-    df["report_date"] = pd.to_datetime(df["report_date"], errors="coerce")
-
-    view = df[[
-        "fund_name","report_date","position_name","position_ticker","position_sector","position_thesis_summary","position_duration_view"
-    ]].rename(columns={
-        "fund_name":"Fund Name",
-        "report_date":"Report Date",
-        "position_name":"Position Name",
-        "position_ticker":"Position Ticker",
-        "position_sector":"Position Sector",
-        "position_thesis_summary":"Position Thesis Summary",
-        "position_duration_view":"Position Duration View"
-    })
-
-    metrics = view.rename(columns={"Position Ticker":"position_ticker"})
-    metrics = _attach_return_columns(metrics, ticker_col="position_ticker").rename(columns={"position_ticker":"Position Ticker"})
-    metrics = metrics.sort_values("Report Date", ascending=False)
-
-    ordered_cols = [
-        "Fund Name","Report Date","Position Name","Position Ticker","Position Sector",
-        "Position Thesis Summary","Position Duration View","1d %","1w %","MTD %","YTD %"
-    ]
-    metrics = metrics[ordered_cols]
-
-    st.dataframe(
-        metrics,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Report Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD", step="day"),
-            "1d %":  st.column_config.NumberColumn(format="%.2f%%"),
-            "1w %":  st.column_config.NumberColumn(format="%.2f%%"),
-            "MTD %": st.column_config.NumberColumn(format="%.2f%%"),
-            "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
-        },
-    )
 
     # 4) Legacy “Source Explorer” preserved from original Market Views
     with tabs[3]:
