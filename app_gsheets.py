@@ -593,9 +593,6 @@ def show_market_view() -> None:
     letters = _map_fund_names(letters, fund_id_col="fund_id")
 
     # ── Row 1 ─────────────────────────────────────────────────────────────
-    st.write("## Fund Positions and Investment Thesis")
-    st.write("Latest manager portfolio positions and investment thesis extracted from fund letters, factsheets.")
-
     top_tabs = st.tabs([
         "Fund Positions",
         "Investment Thesis",
@@ -1255,7 +1252,7 @@ def view_market_memory(ticker_override: str | None = None, start_year_override: 
                 alt.Tooltip("cum:Q", title="Cumulative", format=".2%"),
             ],
         )
-        .properties(padding={"left": 8, "right": 80, "top": 10, "bottom": 30})
+        .properties(height=520, padding={"left": 8, "right": 80, "top": 10, "bottom": 30})
         .configure_legend(labelLimit=2000)
     )
 
@@ -1429,8 +1426,6 @@ def view_market_stress():
 # Router for Market Analytics
 # Replace the whole function
 def show_market_analytics():
-    st.header("Market Analytics")
-
     # Shared controls for BOTH views
     c1, c2, c3 = st.columns([2,1,1])
     with c1:
@@ -1462,16 +1457,26 @@ def main() -> None:
         )
     if page == "Performance Est":
         st.header("Performance Estimates")
-        st.write("Performance estimates sent by hedge funds to investment.coverage@brightside-capital.com.")
-        st.write("Automation and data extraction from emails using n8n and ChatGPT API.")
+        st.write("Performance estimates are sent by hedge funds to investment.coverage@brightside-capital.com.")
+        st.write("Automation and data extraction from emails happens via n8n and ChatGPT API.")
+        st.write("Data stored in a cloud drive and pulled in below.")
         show_performance_view()
+
     elif page == "Market Views":
-        # st.header("Market Views")
+        st.write("## Fund Positions and Investment Thesis")
+        st.write("Latest manager portfolio positions and investment thesis are extracted from fund letters, factshee" \
+        "ts using LLM.")
+        st.write("Automatic PDF extraction via n8n workflowand ChatGPT API.")
         show_market_view()
     elif page == "Fund Monitor":
         st.header("Fund Monitor")
+        st.write("Fund data received via email attachments (pdf) are stored in a cloud drive.")
+        st.write("Exposures, historical returns and other metrics are extracted using the ChatGPT API inside the n8n workflow.")
+        st.write("Data stored in a cloud drive and pulled in/transformed below.")
         show_fund_monitor()
     elif page == "Market Analytics":
+        st.header("Market Analytics")
+        st.write("The idea here is to build a collection of market signals and indicators that provide the AI model with current market context i.e. what is going on? in order to connext the dots.")
         show_market_analytics()
 
 if __name__ == "__main__":
