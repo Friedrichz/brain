@@ -517,10 +517,18 @@ def show_fund_monitor() -> None:
 
 # 1) Monthly Seasonality Explorer
 def _fetch_history(ticker: str, start: str = "1928-01-01") -> pd.DataFrame:
-    df = pdr.get_data_yahoo(ticker, start=start)
-    df = df.rename(columns=str.lower)
-    df = df.reset_index().rename(columns={"Date":"date"})
+    # Use yfinance, auto-adjusted closes; keep column names compatible with existing code
+    df = yf.download(ticker, start=start, auto_adjust=True, progress=False)
+    if df is None or df.empty:
+        raise ValueError(f"No data returned for {ticker}")
+    df = df.reset_index().rename(columns={"Date": "date"})
+    # Lowercase columns to match downstream expectations
+    df.columns = [str(c).lower() for c in df.columns]
+    # Provide 'adj close' alias expected by seasonality/memory/stress views
+    if "adj close" not in df.columns and "close" in df.columns:
+        df["adj close"] = df["close"]
     return df
+
 
 def _seasonality_stats(df: pd.DataFrame) -> pd.DataFrame:
     px = df.copy()
@@ -618,18 +626,38 @@ def _rolling_high(s: pd.Series, n: int) -> pd.Series:
 
 def _scan_breakouts(tickers: List[str], lookbacks: List[int]) -> pd.DataFrame:
     end = datetime.now()
-    start = end - timedelta(days=max(lookbacks)*3)
-    data = pdr.get_data_yahoo(tickers, start=start, end=end)["Adj Close"]
+    start = end - timedelta(days=max(lookbacks) * 3)
+    # Auto-adjusted close via yfinance; returns MultiIndex columns for multi-ticker
+    px = yf.download(
+        tickers=tickers,
+        start=start.strftime("%Y-%m-%d"),
+        end=end.strftime("%Y-%m-%d"),
+        auto_adjust=True,
+        progress=False,
+        group_by="ticker",
+        threads=True
+    )
+    # Extract the Close level and ensure a 2D frame
+    if isinstance(px.columns, pd.MultiIndex) and "Close" in px.columns.levels[1]:
+        data = px.xs("Close", axis=1, level=1)
+    else:
+        # Single ticker case
+        data = px[["Close"]] if "Close" in px.columns else px
+    if isinstance(data, pd.Series):
+        data = data.to_frame()
+    data = data.dropna(how="all")
     latest = data.iloc[-1]
     out = []
     for t in data.columns:
-        row = {"ticker": t, "price": latest[t]}
+        series = data[t].astype(float)
+        row = {"ticker": t, "price": float(latest[t])}
         for n in lookbacks:
-            rh = _rolling_high(data[t], n).iloc[-1]
+            rh = float(series.rolling(n, min_periods=n).max().iloc[-1])
             row[f"high_{n}d"] = rh
             row[f"breakout_{n}d"] = bool(latest[t] >= rh)
         out.append(row)
     return pd.DataFrame(out).sort_values("ticker")
+
 
 def view_breakout_scanner():
     st.subheader("Breakout Scanner")
