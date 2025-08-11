@@ -685,8 +685,6 @@ def _ytd_path(df: pd.DataFrame) -> pd.DataFrame:
     px["cum"] = (1.0 + px["ret"]).groupby(px["year"]).cumprod() - 1.0
     return px[["doy", "year", "cum"]]
 
-
-
 def _closest_years(cur: pd.Series, hist: pd.DataFrame, k: int=5) -> List[int]:
     # Align by day-of-year, compute Euclidean distance
     merged = hist.pivot(index="doy", columns="year", values="cum").dropna(how="all")
@@ -740,18 +738,38 @@ def view_market_memory(ticker_override: str | None = None, start_year_override: 
     years = [y for y, _ in sorted(diffs.items(), key=lambda x: x[1])[:k]]
 
     import altair as alt
-    base = alt.Chart(px[px["year"] == datetime.now().year]).mark_line(size=3).encode(
-        x=alt.X("doy:Q", title="Day of Year"),
-        y=alt.Y("cum:Q", title="Cumulative Return")
+    current_year = datetime.now().year
+
+    px["year_str"] = px["year"].astype(str)
+    subset = px[px["year"].isin(years + [current_year])].copy()
+
+    chart = (
+        alt.Chart(subset)
+        .mark_line()
+        .encode(
+            x=alt.X("doy:Q", title="Day of Year"),
+            y=alt.Y("cum:Q", title="Cumulative Return"),
+            color=alt.Color(
+                "year_str:N",
+                title="Year",
+                legend=alt.Legend(orient="top", direction="horizontal", columns=8),
+            ),
+            size=alt.condition(alt.datum.year == current_year, alt.value(3.0), alt.value(1.5)),
+            opacity=alt.condition(alt.datum.year == current_year, alt.value(1.0), alt.value(0.45)),
+            tooltip=[
+                alt.Tooltip("year_str:N", title="Year"),
+                alt.Tooltip("doy:Q", title="Day"),
+                alt.Tooltip("cum:Q", title="Cumulative", format=".2%"),
+            ],
+        )
+        .properties(padding={"left": 8, "right": 80, "top": 10, "bottom": 30})
+        .configure_legend(labelLimit=2000)
     )
-    others = alt.Chart(px[px["year"].isin(years)]).mark_line(opacity=0.5).encode(
-        x="doy:Q", y="cum:Q", color="year:N"
-    )
-    chart = others + base
+
     st.altair_chart(
         chart,
         use_container_width=True,
-        key=f"mm_chart_{ticker}_{start_year}_{k}"
+        key=f"mm_chart_{ticker}_{start_year}_{k}_{current_year}",
     )
 
 
