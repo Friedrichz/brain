@@ -279,11 +279,11 @@ def _load_letters() -> pd.DataFrame:
     Load 'fund letters' from Google Sheets as configured in st.secrets["fund_letters"].
     Expected keys: sheet_id, worksheet. Returns a DataFrame (may be empty).
     """
-    if not ("fund_letters" in st.secrets and "sheet_id" in st.secrets["fund_letters"]):
-        st.error("Missing 'fund_letters' configuration in secrets.")
+    if not ("letters" in st.secrets and "sheet_id" in st.secrets["letters"]):
+        st.error("Missing 'letters' configuration in secrets.")
         return pd.DataFrame()
-    sheet_id = st.secrets["fund_letters"]["sheet_id"]
-    worksheet = st.secrets["fund_letters"].get("worksheet", "Sheet1")
+    sheet_id = st.secrets["letters"]["sheet_id"]
+    worksheet = st.secrets["letters"].get("worksheet", "Sheet1")
     df = load_sheet(sheet_id, worksheet)
     return df
 
