@@ -603,16 +603,13 @@ def view_monthly_seasonality():
 # 2) Market Memory Explorer
 def _ytd_path(df: pd.DataFrame) -> pd.DataFrame:
     px = df.copy()
-    if "adj close" not in px.columns and "close" in px.columns:
-        px["adj close"] = px["close"]
-    px["date"] = pd.to_datetime(px["date"], errors="coerce")
-
+    # guarantees from _fetch_history: 'date' datetime, 'adj close' present
     px["ret"] = px["adj close"].pct_change().fillna(0.0)
     px["year"] = px["date"].dt.year
     px["doy"] = px["date"].dt.dayofyear
-    paths = px.groupby("year").apply(lambda g: (1 + g["ret"]).cumprod() - 1.0).reset_index()
-    paths = paths.rename(columns={0: "cum"})
-    return px[["date", "year", "doy"]].merge(paths, on=["year", "level_1"]).drop(columns=["level_1"])
+    # per-year cumulative return from Jan 1 of each year
+    px["cum"] = (1.0 + px["ret"]).groupby(px["year"]).cumprod() - 1.0
+    return px[["doy", "year", "cum"]]
 
 
 def _closest_years(cur: pd.Series, hist: pd.DataFrame, k: int=5) -> List[int]:
@@ -637,28 +634,39 @@ def view_market_memory():
     with r:
         start_year = st.number_input("History start year", min_value=1900, max_value=datetime.now().year, value=1950)
         k = st.slider("Similar years", min_value=3, max_value=10, value=5)
+
     df = _fetch_history(ticker, start=f"{start_year}-01-01")
-    px = df.copy()
     px = df.copy()
     if "adj close" not in px.columns and "close" in px.columns:
         px["adj close"] = px["close"]
-    px["date"] = pd.to_datetime(px["date"], errors="coerce")
     px["ret"] = px["adj close"].pct_change().fillna(0.0)
+    px["date"] = pd.to_datetime(px["date"], errors="coerce")
     px["doy"] = px["date"].dt.dayofyear
     px["year"] = px["date"].dt.year
-    px["cum"] = (1+px["ret"]).cumprod() - 1.0
+    # per-year cumulative, not across whole history
+    px["cum"] = (1.0 + px["ret"]).groupby(px["year"]).cumprod() - 1.0
+
     this_year = px[px["year"] == datetime.now().year].set_index("doy")["cum"]
     hist = _ytd_path(df)
-    years = _closest_years(this_year, hist, k=k)
+
+    # nearest years by Euclidean distance on overlapping DOYs
+    pivot = hist.pivot(index="doy", columns="year", values="cum")
+    common = pivot.index[pivot.index.isin(this_year.index)]
+    diffs = {
+        yr: float(np.sqrt(((pivot.loc[common, yr].ffill().fillna(0.0) - this_year.loc[common])**2).mean()))
+        for yr in pivot.columns if yr != datetime.now().year
+    }
+    years = [y for y, _ in sorted(diffs.items(), key=lambda x: x[1])[:k]]
+
     import altair as alt
-    base = alt.Chart(px).transform_filter(
-        alt.datum.year == datetime.now().year
-    ).mark_line(size=3).encode(x=alt.X("doy:Q", title="Day of Year"), y=alt.Y("cum:Q", title="Cumulative Return"), color=alt.value("#1f77b4"))
+    base = alt.Chart(px[px["year"] == datetime.now().year]).mark_line(size=3).encode(
+        x=alt.X("doy:Q", title="Day of Year"),
+        y=alt.Y("cum:Q", title="Cumulative Return")
+    )
     others = alt.Chart(px[px["year"].isin(years)]).mark_line(opacity=0.5).encode(
         x="doy:Q", y="cum:Q", color="year:N"
     )
     st.altair_chart(others + base, use_container_width=True)
-    st.caption("Similarity metric: Euclidean distance on aligned day-of-year cumulative paths.")
 
 # 3) Breakout Scanner
 def _rolling_high(s: pd.Series, n: int) -> pd.Series:
