@@ -277,7 +277,7 @@ def show_performance_view() -> None:
     if "MTD" in df_display.columns:
         df_display["MTD"] = df_display["MTD"].astype(str).fillna("")
     if "Received" in df_display.columns:
-        df_display["Received"] = pd.to_datetime(df_display["Received"], errors="coerce")
+        df_display["Received"] = pd.to_datetime(df_display["Received"], errors="coerce").dt.strftime("%Y-%m-%d")
     st.dataframe(df_display, use_container_width=True, hide_index=True)
 
 
