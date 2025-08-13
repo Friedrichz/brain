@@ -258,7 +258,7 @@ def show_performance_view() -> None:
 
     cols_to_hide = [
         "fund_id","currency","WTD","YTD","Sender","Category","Currency","Net","Gross",
-        "Long Exposure","Short Exposure","Correct","Received","canonical_id","asset_class"
+        "Long Exposure","Short Exposure","Correct","canonical_id","asset_class" # "Received"
     ]
     df_display = df.reset_index(drop=True)
     df_display = df_display.drop(columns=[c for c in cols_to_hide if c in df_display.columns], errors="ignore")
@@ -276,6 +276,8 @@ def show_performance_view() -> None:
         df_display["As of date"] = df_display["As of date"].dt.strftime("%Y-%m-%d")
     if "MTD" in df_display.columns:
         df_display["MTD"] = df_display["MTD"].astype(str).fillna("")
+    if "Received" in df_display.columns:
+        df_display["Received"] = pd.to_datetime(df_display["Received"], errors="coerce")
     st.dataframe(df_display, use_container_width=True, hide_index=True)
 
 
