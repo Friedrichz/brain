@@ -280,70 +280,70 @@ def show_fund_database() -> None:
         )
         edited_df = pd.DataFrame(grid["data"])
 
-        if do_save:
-            def _normalize(cell):
-                if cell is None:
-                    return ""
-                return str(cell).strip()
+        # if do_save:
+        #     def _normalize(cell):
+        #         if cell is None:
+        #             return ""
+        #         return str(cell).strip()
 
-            def _build_key(row_dict: dict) -> str:
-                return f"{_normalize(row_dict.get('Fund Name'))}||{_normalize(row_dict.get('Manager'))}"
+        #     def _build_key(row_dict: dict) -> str:
+        #         return f"{_normalize(row_dict.get('Fund Name'))}||{_normalize(row_dict.get('Manager'))}"
 
-            def _diff_and_update_sheet(edited_df_: pd.DataFrame, sheet_id_: str, worksheet_name_: str) -> tuple[int, int]:
-                from gspread.models import Cell
+        #     def _diff_and_update_sheet(edited_df_: pd.DataFrame, sheet_id_: str, worksheet_name_: str) -> tuple[int, int]:
+        #         from gspread.models import Cell
 
-                client = get_gspread_client()
-                sh = client.open_by_key(sheet_id_)
-                ws = sh.worksheet(worksheet_name_)
+        #         client = get_gspread_client()
+        #         sh = client.open_by_key(sheet_id_)
+        #         ws = sh.worksheet(worksheet_name_)
 
-                values = ws.get_all_values()
-                if not values:
-                    raise RuntimeError("Target worksheet is empty; cannot map columns/rows.")
+        #         values = ws.get_all_values()
+        #         if not values:
+        #             raise RuntimeError("Target worksheet is empty; cannot map columns/rows.")
 
-                header = values[0]
-                col_idx = {name: (header.index(name) + 1) for name in header if name}
-                missing = [c for c in _ALLOWED_COLS if c not in col_idx]
-                if missing:
-                    raise RuntimeError(f"Missing columns in sheet: {missing}")
+        #         header = values[0]
+        #         col_idx = {name: (header.index(name) + 1) for name in header if name}
+        #         missing = [c for c in _ALLOWED_COLS if c not in col_idx]
+        #         if missing:
+        #             raise RuntimeError(f"Missing columns in sheet: {missing}")
 
-                key_to_rownum = {}
-                for i, row_vals in enumerate(values[1:], start=2):
-                    row_dict = {h: (row_vals[j] if j < len(row_vals) else "") for j, h in enumerate(header)}
-                    key = _build_key(row_dict)
-                    if key:
-                        key_to_rownum[key] = i
+        #         key_to_rownum = {}
+        #         for i, row_vals in enumerate(values[1:], start=2):
+        #             row_dict = {h: (row_vals[j] if j < len(row_vals) else "") for j, h in enumerate(header)}
+        #             key = _build_key(row_dict)
+        #             if key:
+        #                 key_to_rownum[key] = i
 
-                keep_cols = [c for c in _ALLOWED_COLS if c in edited_df_.columns]
-                edited_view = edited_df_[keep_cols].copy()
-                edited_view["_key"] = edited_view.apply(lambda s: _build_key(s.to_dict()), axis=1)
+        #         keep_cols = [c for c in _ALLOWED_COLS if c in edited_df_.columns]
+        #         edited_view = edited_df_[keep_cols].copy()
+        #         edited_view["_key"] = edited_view.apply(lambda s: _build_key(s.to_dict()), axis=1)
 
-                cells = []
-                rows_touched = set()
+        #         cells = []
+        #         rows_touched = set()
 
-                for _, row in edited_view.iterrows():
-                    key = row["_key"]
-                    if not key or key not in key_to_rownum:
-                        continue
-                    rnum = key_to_rownum[key]
-                    rows_touched.add(rnum)
-                    raw = values[rnum - 1] if rnum - 1 < len(values) else []
-                    sheet_row_dict = {h: (raw[i] if i < len(raw) else "") for i, h in enumerate(header)}
+        #         for _, row in edited_view.iterrows():
+        #             key = row["_key"]
+        #             if not key or key not in key_to_rownum:
+        #                 continue
+        #             rnum = key_to_rownum[key]
+        #             rows_touched.add(rnum)
+        #             raw = values[rnum - 1] if rnum - 1 < len(values) else []
+        #             sheet_row_dict = {h: (raw[i] if i < len(raw) else "") for i, h in enumerate(header)}
 
-                    for col in keep_cols:
-                        new_val = _normalize(row.get(col))
-                        old_val = _normalize(sheet_row_dict.get(col))
-                        if new_val != old_val:
-                            cells.append(Cell(row=rnum, col=col_idx[col], value=new_val))
+        #             for col in keep_cols:
+        #                 new_val = _normalize(row.get(col))
+        #                 old_val = _normalize(sheet_row_dict.get(col))
+        #                 if new_val != old_val:
+        #                     cells.append(Cell(row=rnum, col=col_idx[col], value=new_val))
 
-                if cells:
-                    ws.update_cells(cells, value_input_option="USER_ENTERED")
-                return (len(cells), len(rows_touched))
+        #         if cells:
+        #             ws.update_cells(cells, value_input_option="USER_ENTERED")
+        #         return (len(cells), len(rows_touched))
 
-            try:
-                changed, touched = _diff_and_update_sheet(edited_df, sheet_id, worksheet)
-                st.success(f"Patched {changed} cells across {touched} rows.")
-            except Exception as exc:
-                st.error(f"Failed to save to Google Sheet: {exc}")
+        #     try:
+        #         changed, touched = _diff_and_update_sheet(edited_df, sheet_id, worksheet)
+        #         st.success(f"Patched {changed} cells across {touched} rows.")
+        #     except Exception as exc:
+        #         st.error(f"Failed to save to Google Sheet: {exc}")
 
     # --- Tab 2: Liquidity & Ops (read-only grid with same filters) ---
     with tabs[1]:
