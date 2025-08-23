@@ -48,7 +48,7 @@ except Exception:  # pandas build without exposed Styler path
 
 
 # --- Drive scopes / helpers (existing) ---
-DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 def _drive_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
