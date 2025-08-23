@@ -1235,14 +1235,16 @@ def show_fund_monitor() -> None:
             st.caption(label)
             st.markdown(f"<div style='font-size:20px;font-weight:600'>{value if value != '' else '-'}</div>", unsafe_allow_html=True)
 
+        _metric_cell("Fund Name", _val("Fund Name", fund_choice))
         r1c1, r1c2, r1c3, r1c4 = st.columns([1, 1, 1, 2])
-        with r1c1: _metric_cell("Fund Name", _val("Fund Name", fund_choice))
-        with r1c2: _metric_cell("Asset Class", _val("Asset Class"))
-        with r1c3: _metric_cell("Type", _val("Type"))
-        with r1c4: _metric_cell("Summary", _val("Summary"))
+        with r1c1: _metric_cell("Asset Class", _val("Asset Class"))
+        with r1c2: _metric_cell("Type", _val("Type"))
+        with r1c3: _metric_cell("Type", _val("AUM (in USD Millions)"))
+        
+        _metric_cell("Summary", _val("Summary"))
 
         r2c1, r2c2, r2c3, r2c4, r2c5 = st.columns(5)
-        with r2c1: _metric_cell("Size", _val("AUM (in USD Millions)"))
+        with r2c1: _metric_cell("Size", _val("Size)"))
         with r2c2: _metric_cell("Time Horizon", _val("Time Horizon"))
         with r2c3: _metric_cell("Style", _val("Style"))
         with r2c4: _metric_cell("Geo", _val("Geo"))
