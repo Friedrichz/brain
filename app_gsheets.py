@@ -1419,11 +1419,12 @@ def show_fund_monitor() -> None:
         spacer(12)
 
         # ===== Row 2: Size, Time Horizon, Style, Geo, Sector =====
-        r2c2, r2c3, r2c4, r2c5 = st.columns(4)
+        r2c2, r2c3, r2c4, r2c5, r2c1 = st.columns(5)
         with r2c2: _fm_scorecard("Time Horizon", _fm_get_val(profile_row, "Time Horizon"))
         with r2c3: _fm_scorecard("Style", _fm_get_val(profile_row, "Style"))
         with r2c4: _fm_scorecard("Geo", _fm_get_val(profile_row, "Geo"))
         with r2c5: _fm_scorecard("Sector", _fm_get_val(profile_row, "Sector"))
+        with r2c6: _fm_scorecard("Universe Size", _fm_get_val(profile_row, "Size"))
         spacer(12)
 
         # ===== Row 3: Avg # Positions, Avg Gross, Avg Net, Mgmt Fee, Perf Fee =====
