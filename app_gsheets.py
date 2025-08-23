@@ -1410,16 +1410,16 @@ def show_fund_monitor() -> None:
         spacer(12)
 
         # ===== Row 1: Asset Class, Type, Manager Name =====
-        r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+        r1c1, r1c2, r1c3, r1c4, r1c5 = st.columns(5)
         with r1c1: _fm_scorecard("Asset Class", _fm_get_val(profile_row, "Asset Class"))
         with r1c2: _fm_scorecard("Type", _fm_get_val(profile_row, "Type"))
         with r1c3: _fm_scorecard("Manager Name", _fm_get_val(profile_row, "Manager Name"))
         with r1c4: _fm_scorecard("Inception", _fm_get_val(profile_row, "Inception"))
+        with r1c5: _fm_scorecard("AUM (in USD Millions)", _fm_get_val(profile_row, "AUM (in USD Millions)"))
         spacer(12)
 
         # ===== Row 2: Size, Time Horizon, Style, Geo, Sector =====
-        r2c1, r2c2, r2c3, r2c4, r2c5 = st.columns(5)
-        with r2c1: _fm_scorecard("AUM (in USD Millions)", _fm_get_val(profile_row, "AUM (in USD Millions)"))
+        r2c2, r2c3, r2c4, r2c5 = st.columns(4)
         with r2c2: _fm_scorecard("Time Horizon", _fm_get_val(profile_row, "Time Horizon"))
         with r2c3: _fm_scorecard("Style", _fm_get_val(profile_row, "Style"))
         with r2c4: _fm_scorecard("Geo", _fm_get_val(profile_row, "Geo"))
