@@ -266,7 +266,7 @@ def show_fund_database() -> None:
         # Top-right save button
         top_l, top_r = st.columns([1, 0.18])
         with top_r:
-            do_save = st.button("save changes", type="primary", use_container_width=True)
+            # do_save = st.button("save changes", type="primary", use_container_width=True)
 
         # Editable grid (lock Fund Name)
         gb = GridOptionsBuilder.from_dataframe(display_df if not display_df.empty else pd.DataFrame(columns=_ALLOWED_COLS))
