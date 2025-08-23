@@ -204,6 +204,69 @@ def build_exposure_df(row: pd.Series, prefixes: List[str]) -> pd.DataFrame:
         parts.append(df)
     return pd.concat(parts, axis=1)
 
+
+
+# === New page: Fund Database ===
+def show_fund_database() -> None:
+
+    tabs = st.tabs(["Overview", "Dilligence", "Liquidity Terms"])
+
+    # --- Tab 1: Overview (Google Sheet <-> Streamlit editable grid) ---
+    with tabs[0]:
+        if not ("fund_database" in st.secrets and "sheet_id" in st.secrets["fund_database"]):
+            st.error("Missing 'fund_database' configuration in secrets.")
+            return
+        sheet_id = st.secrets["fund_database"]["sheet_id"]
+        worksheet = st.secrets["fund_database"].get("worksheet", "fund database")
+
+        # Load current data (reuses existing helpers):contentReference[oaicite:1]{index=1}
+        df = load_sheet(sheet_id, worksheet)
+        if df.empty:
+            st.warning("No rows found in the 'fund database' sheet.")
+            df = pd.DataFrame()
+
+        st.caption("Edit cells in-place. Click 'Save changes to Google Sheet' to persist.")
+
+        # Build editable grid
+        gb = GridOptionsBuilder.from_dataframe(df if not df.empty else pd.DataFrame(columns=[""]))
+        gb.configure_default_column(editable=True, resizable=True, filter=True)
+        gb.configure_grid_options(rowSelection="single")
+        grid = AgGrid(
+            df,
+            gridOptions=gb.build(),
+            theme="streamlit",
+            enable_enterprise_modules=False,
+            allow_unsafe_jscode=False,
+            fit_columns_on_grid_load=True,
+            update_mode="MODEL_CHANGED",   # capture edits as they occur
+            reload_data=False,
+        )
+
+        edited_df = pd.DataFrame(grid["data"])
+
+        # Save button: overwrite the worksheet with current grid contents
+        if st.button("Save changes to Google Sheet", type="primary", use_container_width=False):
+            try:
+                client = get_gspread_client()            # existing auth helper:contentReference[oaicite:2]{index=2}
+                sh = client.open_by_key(sheet_id)
+                ws = sh.worksheet(worksheet)
+                # Overwrite all: header + values
+                values = [edited_df.columns.tolist()] + edited_df.fillna("").astype(str).values.tolist()
+                ws.clear()
+                ws.update("A1", values, value_input_option="USER_ENTERED")
+                st.success("Saved.")
+            except Exception as exc:
+                st.error(f"Failed to save to Google Sheet: {exc}")
+
+    # --- Tab 2: Dilligence (placeholder) ---
+    with tabs[1]:
+        st.info("Add content here.")
+
+    # --- Tab 3: Liquidity Terms (placeholder) ---
+    with tabs[2]:
+        st.info("Add content here.")
+
+
 # ---- Existing product pages (kept as-is) ----
 
 def show_performance_view() -> None:
@@ -1662,11 +1725,15 @@ def main() -> None:
     with st.sidebar:
         page = option_menu(
             "Navigation",
-            ["Performance Est", "Market Views", "Fund Monitor", "Market Analytics"],  # new option added:contentReference[oaicite:6]{index=6}
+            ["Fund Database", "Performance Est", "Market Views", "Fund Monitor", "Market Analytics"],  # :contentReference[oaicite:1]{index=1}
             default_index=0,
             orientation="vertical"
         )
-    if page == "Performance Est":
+    if page == "Fund Database":  # :contentReference[oaicite:2]{index=2}
+        st.header("Fund Database")
+        show_fund_database()
+    
+    elif page == "Performance Est":
         st.header("Performance Estimates")
         st.write("Performance estimates are sent by hedge funds to investment.coverage@brightside-capital.com.")
         st.write("Automation and data extraction from emails happens via n8n and ChatGPT API.")
