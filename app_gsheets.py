@@ -1236,6 +1236,15 @@ def _arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
             out[c] = s.astype("Int64")
     return out
 
+def _md_text(val: str) -> str:
+    """Render multi-line sheet text with preserved line breaks for st.markdown(unsafe_allow_html=True)."""
+    if val is None:
+        return "&nbsp;"
+    s = str(val).strip()
+    if s == "":
+        return "&nbsp;"
+    return s.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
+
 # ======== REPLACE the whole function: show_fund_monitor() ========
 def show_fund_monitor() -> None:
     import pandas as pd
