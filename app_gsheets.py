@@ -1144,7 +1144,99 @@ def _format_exposure_table(df: pd.DataFrame) -> Styler:
 
 
 # ======== show_fund_monitor()  ========
+# === helpers for robust profile lookup + safe rendering ===
+def _clean_cols(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
 
+def _norm_text(s) -> str:
+    import re as _re
+    return _re.sub(r"[^a-z0-9]+", "", str(s).lower()).strip()
+
+def _lookup_profile(db: pd.DataFrame, fund_choice: str, selected_canonical_id: str):
+    from difflib import SequenceMatcher
+    db = _clean_cols(db)
+
+    # 1) match by canonical id if sheet carries it
+    for cid_col in ["canonical_id", "fund_id", "Canonical ID", "Fund ID"]:
+        if cid_col in db.columns:
+            m = db[cid_col].astype(str) == str(selected_canonical_id)
+            if m.any():
+                return db[m].iloc[0]
+
+    # 2) exact/ci match on Fund Name
+    if "Fund Name" in db.columns:
+        m = db["Fund Name"].astype(str).str.strip() == str(fund_choice).strip()
+        if not m.any():
+            m = db["Fund Name"].astype(str).str.casefold() == str(fund_choice).casefold()
+        if m.any():
+            return db[m].iloc[0]
+
+        # 3) fuzzy fallback
+        key = _norm_text(fund_choice)
+        keys = db["Fund Name"].map(_norm_text)
+        if not keys.empty:
+            sim = keys.apply(lambda k: SequenceMatcher(a=k, b=key).ratio())
+            idx = sim.idxmax()
+            if float(sim.loc[idx]) >= 0.90:
+                return db.loc[idx]
+
+    return None
+
+# logical->column aliases so sheets with slightly different headers still populate
+_ALIASES = {
+    "Fund Name": ["Fund Name", "Name", "Fund"],
+    "Asset Class": ["Asset Class"],
+    "Type": ["Type", "Strategy Type"],
+    "Summary": ["Summary", "One-Liner", "Description"],
+    "AUM (in USD Millions)": ["AUM (in USD Millions)", "AUM (USD m)", "AUM (USD Millions)", "AUM"],
+    "Time Horizon": ["Time Horizon", "Horizon"],
+    "Style": ["Style"],
+    "Geo": ["Geo", "Geography", "Region"],
+    "Sector": ["Sector", "Primary Sector", "Focus Sector"],
+    "Avg # Positions": ["Avg # Positions", "Average # Positions", "Avg Positions"],
+    "Avg Gross": ["Avg Gross", "Average Gross"],
+    "Avg Net": ["Avg Net", "Average Net"],
+    "Management Fee": ["Management Fee", "Mgmt Fee"],
+    "Performance Fee": ["Performance Fee", "Perf Fee", "Incentive Fee"],
+    "Inception": ["Inception", "Inception Year", "Launch"],
+    "Market Opportunity": ["Market Opportunity", "Opportunity"],
+    "Risks": ["Risks", "Key Risks"],
+    "Team Background": ["Team Background", "Team", "Background"],
+    "Edge / What they do": ["Edge / What they do", "Edge", "What they do"],
+    "Portfolio": ["Portfolio", "Guidelines"],
+}
+
+def _get_val(row: pd.Series | None, logical_col: str, fallback: str = "") -> str:
+    if row is None:
+        return fallback
+    for col in _ALIASES.get(logical_col, [logical_col]):
+        if col in row.index:
+            v = row.get(col)
+            if pd.isna(v):
+                continue
+            s = str(v).strip()
+            if s != "":
+                return s
+    return fallback
+
+def _arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
+    """Coerce mixed/object cols to Arrow-safe types before st.dataframe."""
+    out = df.copy()
+    for c in out.columns:
+        s = out[c]
+        if pd.api.types.is_object_dtype(s):
+            num = pd.to_numeric(s, errors="coerce")
+            if num.notna().sum() >= 0.9 * len(s):
+                out[c] = num
+            else:
+                out[c] = s.where(~s.isna(), "").astype("string")
+        elif pd.api.types.is_integer_dtype(s):
+            out[c] = s.astype("Int64")
+    return out
+
+# ======== REPLACE the whole function: show_fund_monitor() ========
 def show_fund_monitor() -> None:
     import pandas as pd
     import numpy as np
@@ -1187,7 +1279,7 @@ def show_fund_monitor() -> None:
     fund_options = canonical_funds["canonical_name"].tolist()
     fund_index = fund_options.index(default_fund) if default_fund in fund_options else 0
 
-    csel1, csel2 = st.columns([2, 1])
+    csel1, _ = st.columns([2, 1])
     with csel1:
         fund_choice = st.selectbox("Select Fund", fund_options, index=fund_index, key="fm_fund_select")
     selected_canonical_id = canonical_funds.loc[
@@ -1196,8 +1288,8 @@ def show_fund_monitor() -> None:
 
     # Normalize dates now; pre-slice to this fund
     if "date" in df.columns:
-        df["date"] = df["date"].apply(parse_any_date)
-    fund_df = df[df["fund_id"] == selected_canonical_id].copy()
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    fund_df = df[df["fund_id"].astype(str) == str(selected_canonical_id)].copy()
     if fund_df.empty:
         st.warning("No records found for the selected fund.")
         return
@@ -1209,88 +1301,79 @@ def show_fund_monitor() -> None:
     # Tab 1: Overview
     # --------------------------------
     with tabs[0]:
-        # ---- Profile from Fund Database ----
+        # ---- Profile from Fund Database (robust lookup with aliases) ----
         profile_row = None
         try:
             if "fund_database" in st.secrets and "sheet_id" in st.secrets["fund_database"]:
                 db_id = st.secrets["fund_database"]["sheet_id"]
                 db_ws = st.secrets["fund_database"].get("worksheet", "fund database")
                 db = load_sheet(db_id, db_ws)
-                if not db.empty and "Fund Name" in db.columns:
-                    # exact match first, then casefold fallback
-                    m = db["Fund Name"] == fund_choice
-                    if not m.any():
-                        m = db["Fund Name"].astype(str).str.casefold() == str(fund_choice).casefold()
-                    if m.any():
-                        profile_row = db[m].iloc[0]
+                if not db.empty:
+                    profile_row = _lookup_profile(db, fund_choice, str(selected_canonical_id))
         except Exception:
             profile_row = None
 
-        def _val(col, fallback=""):
-            if profile_row is None:
-                return fallback
-            return "" if pd.isna(profile_row.get(col)) else str(profile_row.get(col))
-
         def _metric_cell(label, value):
             st.caption(label)
-            st.markdown(f"<div style='font-size:20px;font-weight:600'>{value if value != '' else '-'}</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div style='font-size:20px;font-weight:600'>{value if value != '' else '-'}</div>",
+                unsafe_allow_html=True,
+            )
 
-        _metric_cell("Fund Name", _val("Fund Name", fund_choice))
-        r1c1, r1c2, r1c3, r1c4 = st.columns([1, 1, 1, 2])
-        with r1c1: _metric_cell("Asset Class", _val("Asset Class"))
-        with r1c2: _metric_cell("Type", _val("Type"))
-        with r1c3: _metric_cell("Type", _val("AUM (in USD Millions)"))
-        
-        _metric_cell("Summary", _val("Summary"))
+        # Top rows to mirror screenshot
+        r0c1, r0c2, r0c3, r0c4 = st.columns([1, 1, 1, 2])
+        with r0c1: _metric_cell("Fund Name", _get_val(profile_row, "Fund Name", fund_choice))
+        with r0c2: _metric_cell("Asset Class", _get_val(profile_row, "Asset Class"))
+        with r0c3: _metric_cell("Type", _get_val(profile_row, "Type"))
+        with r0c4: _metric_cell("Summary", _get_val(profile_row, "Summary"))
 
-        r2c1, r2c2, r2c3, r2c4, r2c5 = st.columns(5)
-        with r2c1: _metric_cell("Size", _val("Size)"))
-        with r2c2: _metric_cell("Time Horizon", _val("Time Horizon"))
-        with r2c3: _metric_cell("Style", _val("Style"))
-        with r2c4: _metric_cell("Geo", _val("Geo"))
-        with r2c5: _metric_cell("Sector", _val("Sector"))
+        r1c1, r1c2, r1c3, r1c4, r1c5 = st.columns(5)
+        with r1c1: _metric_cell("Size", _get_val(profile_row, "AUM (in USD Millions)"))
+        with r1c2: _metric_cell("Time Horizon", _get_val(profile_row, "Time Horizon"))
+        with r1c3: _metric_cell("Style", _get_val(profile_row, "Style"))
+        with r1c4: _metric_cell("Geo", _get_val(profile_row, "Geo"))
+        with r1c5: _metric_cell("Sector", _get_val(profile_row, "Sector"))
 
-        r3 = st.columns(6)
-        with r3[0]: _metric_cell("Avg # Positions", _val("Avg # Positions"))
-        with r3[1]: _metric_cell("Avg Gross", _val("Avg Gross"))
-        with r3[2]: _metric_cell("Avg Net", _val("Avg Net"))
-        with r3[3]: _metric_cell("Management Fee", _val("Management Fee"))
-        with r3[4]: _metric_cell("Performance Fee", _val("Performance Fee"))
-        with r3[5]: _metric_cell("Inception", _val("Inception"))
+        r2 = st.columns(6)
+        with r2[0]: _metric_cell("Avg # Positions", _get_val(profile_row, "Avg # Positions"))
+        with r2[1]: _metric_cell("Avg Gross", _get_val(profile_row, "Avg Gross"))
+        with r2[2]: _metric_cell("Avg Net", _get_val(profile_row, "Avg Net"))
+        with r2[3]: _metric_cell("Management Fee", _get_val(profile_row, "Management Fee"))
+        with r2[4]: _metric_cell("Performance Fee", _get_val(profile_row, "Performance Fee"))
+        with r2[5]: _metric_cell("Inception", _get_val(profile_row, "Inception"))
 
-        expander_cols = st.columns(3)
-        with expander_cols[0]:
+        ec = st.columns(3)
+        with ec[0]:
             with st.expander("Market Opportunity", expanded=False):
-                st.write(_val("Market Opportunity"))
+                st.write(_get_val(profile_row, "Market Opportunity"))
             with st.expander("Risks", expanded=False):
-                st.write(_val("Risks"))
-        with expander_cols[1]:
+                st.write(_get_val(profile_row, "Risks"))
+        with ec[1]:
             with st.expander("Team Background", expanded=False):
-                st.write(_val("Team Background"))
+                st.write(_get_val(profile_row, "Team Background"))
             with st.expander("Edge / What they do", expanded=False):
-                st.write(_val("Edge / What they do"))
-        with expander_cols[2]:
+                st.write(_get_val(profile_row, "Edge / What they do"))
+        with ec[2]:
             with st.expander("Portfolio", expanded=False):
-                st.write(_val("Portfolio"))
+                st.write(_get_val(profile_row, "Portfolio"))
 
         st.markdown("---")
 
         # ---- Cumulative Return + AUM history (moved here) ----
-        hc1, hc2 = st.columns(2, vertical_alignment="top")
+        hc1, hc2 = st.columns(2)
 
         with hc1:
             st.subheader("Cumulative Performance")
             track_record = fetch_track_record_json(selected_canonical_id)
             if track_record and isinstance(track_record.get("returns"), list):
                 returns_df = pd.DataFrame(track_record["returns"])
-                # normalize columns
                 if "date" not in returns_df.columns or "return" not in returns_df.columns:
                     if {"date", "ret"} <= set(returns_df.columns):
                         returns_df = returns_df.rename(columns={"ret": "return"})
                     elif {"date", "value"} <= set(returns_df.columns):
                         returns_df = returns_df.rename(columns={"value": "return"})
                 if {"date", "return"} <= set(returns_df.columns):
-                    returns_df["date"] = returns_df["date"].apply(parse_any_date)
+                    returns_df["date"] = pd.to_datetime(returns_df["date"], errors="coerce")
                     returns_df["return"] = pd.to_numeric(returns_df["return"], errors="coerce")
                     returns_df = returns_df.dropna(subset=["date", "return"]).sort_values("date")
                     if not returns_df.empty:
@@ -1306,8 +1389,6 @@ def show_fund_monitor() -> None:
                             .properties(height=350)
                         )
                         st.altair_chart(ch, use_container_width=True)
-                    else:
-                        st.info("No return series available.")
                 else:
                     st.info("No return series available.")
             else:
@@ -1340,16 +1421,16 @@ def show_fund_monitor() -> None:
                 st.altair_chart(ch, use_container_width=True)
 
     # --------------------------------
-    # Tab 2: Exposures  (everything except the two historical charts)
+    # Tab 2: Exposures  (keep everything except historical AUM/returns)
     # --------------------------------
     with tabs[1]:
-        date_values = sorted(fund_df["date"].dropna().unique().tolist(), reverse=True)
-        if not date_values:
+        dates = sorted(fund_df["date"].dropna().unique().tolist(), reverse=True)
+        if not dates:
             st.warning("No dates available for this fund.")
             return
         c1, c2 = st.columns([2, 1])
         with c1:
-            date_choice = st.selectbox("Select Date", date_values, key="fm_date_select")
+            date_choice = st.selectbox("Select Date", dates, key="fm_date_select")
         with c2:
             file_types = fund_df["file_type"].dropna().unique().tolist() if "file_type" in fund_df.columns else []
             if file_types:
@@ -1375,15 +1456,12 @@ def show_fund_monitor() -> None:
         sc1, sc2 = st.columns([3, 1])
         with sc1:
             bullets, repdate = [], None
-            try:
-                letters = _load_letters()
-            except Exception:
-                letters = pd.DataFrame()
+            letters = _load_letters()
             if (
                 not letters.empty
                 and {"fund_id", "report_date", "letter_summary_5_bullets"} <= set(letters.columns)
             ):
-                fl = letters[letters["fund_id"] == selected_canonical_id].copy()
+                fl = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
                 fl["report_date"] = pd.to_datetime(fl["report_date"], errors="coerce")
                 if fl["report_date"].notna().any():
                     repdate = fl["report_date"].max()
@@ -1397,14 +1475,11 @@ def show_fund_monitor() -> None:
 
         with sc2:
             st.markdown("**Top 10 Positions**")
-            try:
-                letters = _load_letters()
-            except Exception:
-                letters = pd.DataFrame()
+            letters = _load_letters()
             if letters.empty or not {"fund_id", "report_date", "position_ticker", "position_weight_percent"} <= set(letters.columns):
                 st.info("No positions available.")
             else:
-                dfp = letters[letters["fund_id"] == selected_canonical_id].copy()
+                dfp = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
                 dfp["report_date"] = pd.to_datetime(dfp["report_date"], errors="coerce")
                 if dfp.empty or dfp["report_date"].dropna().empty:
                     st.info("No positions available.")
@@ -1422,10 +1497,9 @@ def show_fund_monitor() -> None:
                             "position_weight_percent": "Position Weight (%)",
                         }
                     ).copy()
-                    view = view.dropna(subset=["Position Ticker", "Position Weight (%)"])
                     view["Position Weight (%)"] = pd.to_numeric(view["Position Weight (%)"], errors="coerce")
-                    view = view.sort_values("Position Weight (%)", ascending=False).head(10)
-                    st.dataframe(view, use_container_width=True)
+                    view = view.dropna(subset=["Position Ticker"]).sort_values("Position Weight (%)", ascending=False).head(10)
+                    st.dataframe(_arrow_safe(view), use_container_width=True)
 
         # exposures tables
         st.subheader("Exposures")
@@ -1436,19 +1510,22 @@ def show_fund_monitor() -> None:
             with ec1:
                 st.markdown("**Sector Exposures**")
                 sector_df = build_exposure_df(row, sector_keys)
-                st.dataframe(_format_exposure_table(sector_df), use_container_width=True)
+                st.dataframe(_arrow_safe(_format_exposure_table(sector_df).data), use_container_width=True)
         if all(k in row.index for k in geo_keys):
             with ec2:
                 st.markdown("**Geographical Exposures**")
                 geo_df = build_exposure_df(row, geo_keys)
-                st.dataframe(_format_exposure_table(geo_df), use_container_width=True)
+                st.dataframe(_arrow_safe(_format_exposure_table(geo_df).data), use_container_width=True)
 
-        # net/gross time series (keep here if you already had it; omit AUM/returns which moved to Overview)
+        # net/gross time series (kept here)
         if {"date", "net", "gross"} <= set(fund_df.columns):
             hist_df = fund_df[["date", "net", "gross"]].copy()
             hist_df["date"] = pd.to_datetime(hist_df["date"], errors="coerce")
-            hist_df["net"] = hist_df["net"].apply(percent_to_float)
-            hist_df["gross"] = hist_df["gross"].apply(percent_to_float)
+            def _pct(x):
+                x = str(x)
+                return float(x.replace("%", "")) if "%" in x else pd.to_numeric(x, errors="coerce")
+            hist_df["net"] = hist_df["net"].apply(_pct)
+            hist_df["gross"] = hist_df["gross"].apply(_pct)
             hist_df = hist_df.dropna(subset=["date", "net", "gross"]).sort_values("date")
             if not hist_df.empty:
                 ch = (
@@ -1470,6 +1547,8 @@ def show_fund_monitor() -> None:
     # --------------------------------
     with tabs[2]:
         st.info("Quant analytics placeholder.")
+
+
 
 
 # =========================
