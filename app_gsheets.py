@@ -259,9 +259,9 @@ def show_fund_database() -> None:
         display_df = filtered[show_cols].copy() if show_cols else filtered.copy()
         display_df = display_df.reindex(columns=show_cols)
 
-        top_l, top_r = st.columns([1, 0.18])
-        with top_r:
-            # do_save = st.button("save changes", type="primary", use_container_width=True, key="fd_ov_save")
+        # top_l, top_r = st.columns([1, 0.18])
+        # with top_r:
+        #     # do_save = st.button("save changes", type="primary", use_container_width=True, key="fd_ov_save")
 
         gb = GridOptionsBuilder.from_dataframe(display_df if not display_df.empty else pd.DataFrame(columns=_ALLOWED_COLS))
         gb.configure_default_column(editable=True, resizable=True, filter=True)
