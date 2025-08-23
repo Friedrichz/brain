@@ -2231,7 +2231,7 @@ def main() -> None:
 
     # ---------- Sidebar: logo ----------
     try:
-        logo_path = "/mnt/data/65e381cf-eddf-4447-a205-007564a9e8d3.png"
+        logo_path = "logo_bs.png"
         with open(logo_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
         st.sidebar.markdown(
