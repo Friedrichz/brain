@@ -1300,292 +1300,163 @@ def show_fund_monitor() -> None:
     # --------------------------------
     # Tab 1: Overview
     # --------------------------------
-# ====================== OVERVIEW TAB (drop-in replacement) ======================
-with tabs[0]:
-    # ---- Load profile row from Fund Database ----
-    profile_row = None
-    try:
-        if "fund_database" in st.secrets and "sheet_id" in st.secrets["fund_database"]:
-            db_id = st.secrets["fund_database"]["sheet_id"]
-            db_ws = st.secrets["fund_database"].get("worksheet", "fund database")
-            db = load_sheet(db_id, db_ws)
-            if not db.empty:
-                profile_row = _lookup_profile(db, fund_choice, str(selected_canonical_id))
-    except Exception:
+    # ====================== OVERVIEW TAB (drop-in replacement) ======================
+    with tabs[0]:
+        # ---- Load profile row from Fund Database ----
         profile_row = None
+        try:
+            if "fund_database" in st.secrets and "sheet_id" in st.secrets["fund_database"]:
+                db_id = st.secrets["fund_database"]["sheet_id"]
+                db_ws = st.secrets["fund_database"].get("worksheet", "fund database")
+                db = load_sheet(db_id, db_ws)
+                if not db.empty:
+                    profile_row = _lookup_profile(db, fund_choice, str(selected_canonical_id))
+        except Exception:
+            profile_row = None
 
-    # ---- Helpers: scorecards + text rendering ----
-    FIELD_DESC = {
-        "Asset Class": "Primary investment universe.",
-        "Type": "Directional posture or mandate.",
-        "AUM (in USD Millions)": "Strategy size in USD millions.",
-        "Time Horizon": "Typical holding period.",
-        "Style": "Investment style tilt.",
-        "Geo": "Main geography focus.",
-        "Sector": "Primary sector focus.",
-        "Avg # Positions": "Average number of active positions.",
-        "Avg Gross": "Typical gross exposure.",
-        "Avg Net": "Typical net exposure.",
-        "Management Fee": "Annual management fee.",
-        "Performance Fee": "Incentive fee on profits.",
-        "Inception": "Strategy start year/date.",
-    }
+        # ---- Helpers: scorecards + text rendering ----
+        FIELD_DESC = {
+            "Asset Class": "Primary investment universe.",
+            "Type": "Directional posture or mandate.",
+            "AUM (in USD Millions)": "Strategy size in USD millions.",
+            "Time Horizon": "Typical holding period.",
+            "Style": "Investment style tilt.",
+            "Geo": "Main geography focus.",
+            "Sector": "Primary sector focus.",
+            "Avg # Positions": "Average number of active positions.",
+            "Avg Gross": "Typical gross exposure.",
+            "Avg Net": "Typical net exposure.",
+            "Management Fee": "Annual management fee.",
+            "Performance Fee": "Incentive fee on profits.",
+            "Inception": "Strategy start year/date.",
+        }
 
-    def _scorecard(label: str, value: str, desc: str = "") -> None:
-        v = value if (value is not None and str(value).strip() != "") else "-"
-        d = desc or "&nbsp;"
-        st.markdown(
-            f"""
-            <div style="border:1px solid #e5e7eb;border-radius:12px;padding:10px 12px;height:100%;background:#ffffff;">
-              <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.04em">{label}</div>
-              <div style="font-size:20px;font-weight:600;margin-top:4px">{v}</div>
-              <div style="font-size:12px;color:#9ca3af;margin-top:6px">{d}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        def _scorecard(label: str, value: str, desc: str = "") -> None:
+            v = value if (value is not None and str(value).strip() != "") else "-"
+            d = desc or "&nbsp;"
+            st.markdown(
+                f"""
+                <div style="border:1px solid #e5e7eb;border-radius:12px;padding:10px 12px;height:100%;background:#ffffff;">
+                <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.04em">{label}</div>
+                <div style="font-size:20px;font-weight:600;margin-top:4px">{v}</div>
+                <div style="font-size:12px;color:#9ca3af;margin-top:6px">{d}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-    # ===== Top row: Fund Name + Summary =====
-    t1, t2 = st.columns([1, 2])
-    with t1:
-        st.markdown(
-            f"<div style='font-size:28px;font-weight:700;line-height:1.1'>{_get_val(profile_row, 'Fund Name', fund_choice)}</div>",
-            unsafe_allow_html=True,
-        )
-    with t2:
-        st.markdown(_md_text(_get_val(profile_row, "Summary")), unsafe_allow_html=True)
+        # ===== Top row: Fund Name + Summary =====
+        t1, t2 = st.columns([1, 2])
+        with t1:
+            st.markdown(
+                f"<div style='font-size:28px;font-weight:700;line-height:1.1'>{_get_val(profile_row, 'Fund Name', fund_choice)}</div>",
+                unsafe_allow_html=True,
+            )
+        with t2:
+            st.markdown(_md_text(_get_val(profile_row, "Summary")), unsafe_allow_html=True)
 
-    # ===== Scorecards with descriptions =====
-    c1, c2 = st.columns(2)
-    with c1: _scorecard("Asset Class", _get_val(profile_row, "Asset Class"), FIELD_DESC["Asset Class"])
-    with c2: _scorecard("Type", _get_val(profile_row, "Type"), FIELD_DESC["Type"])
+        # ===== Scorecards with descriptions =====
+        c1, c2 = st.columns(2)
+        with c1: _scorecard("Asset Class", _get_val(profile_row, "Asset Class"), FIELD_DESC["Asset Class"])
+        with c2: _scorecard("Type", _get_val(profile_row, "Type"), FIELD_DESC["Type"])
 
-    c3, c4, c5, c6, c7 = st.columns(5)
-    with c3: _scorecard("Size", _get_val(profile_row, "AUM (in USD Millions)"), FIELD_DESC["AUM (in USD Millions)"])
-    with c4: _scorecard("Time Horizon", _get_val(profile_row, "Time Horizon"), FIELD_DESC["Time Horizon"])
-    with c5: _scorecard("Style", _get_val(profile_row, "Style"), FIELD_DESC["Style"])
-    with c6: _scorecard("Geo", _get_val(profile_row, "Geo"), FIELD_DESC["Geo"])
-    with c7: _scorecard("Sector", _get_val(profile_row, "Sector"), FIELD_DESC["Sector"])
+        c3, c4, c5, c6, c7 = st.columns(5)
+        with c3: _scorecard("Size", _get_val(profile_row, "AUM (in USD Millions)"), FIELD_DESC["AUM (in USD Millions)"])
+        with c4: _scorecard("Time Horizon", _get_val(profile_row, "Time Horizon"), FIELD_DESC["Time Horizon"])
+        with c5: _scorecard("Style", _get_val(profile_row, "Style"), FIELD_DESC["Style"])
+        with c6: _scorecard("Geo", _get_val(profile_row, "Geo"), FIELD_DESC["Geo"])
+        with c7: _scorecard("Sector", _get_val(profile_row, "Sector"), FIELD_DESC["Sector"])
 
-    c8, c9, c10, c11, c12, c13 = st.columns(6)
-    with c8: _scorecard("Avg # Positions", _get_val(profile_row, "Avg # Positions"), FIELD_DESC["Avg # Positions"])
-    with c9: _scorecard("Avg Gross", _get_val(profile_row, "Avg Gross"), FIELD_DESC["Avg Gross"])
-    with c10: _scorecard("Avg Net", _get_val(profile_row, "Avg Net"), FIELD_DESC["Avg Net"])
-    with c11: _scorecard("Management Fee", _get_val(profile_row, "Management Fee"), FIELD_DESC["Management Fee"])
-    with c12: _scorecard("Performance Fee", _get_val(profile_row, "Performance Fee"), FIELD_DESC["Performance Fee"])
-    with c13: _scorecard("Inception", _get_val(profile_row, "Inception"), FIELD_DESC["Inception"])
+        c8, c9, c10, c11, c12, c13 = st.columns(6)
+        with c8: _scorecard("Avg # Positions", _get_val(profile_row, "Avg # Positions"), FIELD_DESC["Avg # Positions"])
+        with c9: _scorecard("Avg Gross", _get_val(profile_row, "Avg Gross"), FIELD_DESC["Avg Gross"])
+        with c10: _scorecard("Avg Net", _get_val(profile_row, "Avg Net"), FIELD_DESC["Avg Net"])
+        with c11: _scorecard("Management Fee", _get_val(profile_row, "Management Fee"), FIELD_DESC["Management Fee"])
+        with c12: _scorecard("Performance Fee", _get_val(profile_row, "Performance Fee"), FIELD_DESC["Performance Fee"])
+        with c13: _scorecard("Inception", _get_val(profile_row, "Inception"), FIELD_DESC["Inception"])
 
-    # ===== Narrative sections (expanders, expanded by default; exact sheet labels) =====
-    r1c1, r1c2 = st.columns(2)
-    with r1c1:
-        with st.expander("Market Opportunity", expanded=True):
-            st.markdown(_md_text(_get_val(profile_row, "Market Opportunity")), unsafe_allow_html=True)
-    with r1c2:
-        with st.expander("Risks", expanded=True):
-            st.markdown(_md_text(_get_val(profile_row, "Risks")), unsafe_allow_html=True)
+        # ===== Narrative sections (expanders, expanded by default; exact sheet labels) =====
+        r1c1, r1c2 = st.columns(2)
+        with r1c1:
+            with st.expander("Market Opportunity", expanded=True):
+                st.markdown(_md_text(_get_val(profile_row, "Market Opportunity")), unsafe_allow_html=True)
+        with r1c2:
+            with st.expander("Risks", expanded=True):
+                st.markdown(_md_text(_get_val(profile_row, "Risks")), unsafe_allow_html=True)
 
-    r2c1, r2c2, r2c3 = st.columns(3)
-    with r2c1:
-        with st.expander("Team Background", expanded=True):
-            st.markdown(_md_text(_get_val(profile_row, "Team Background")), unsafe_allow_html=True)
-    with r2c2:
-        with st.expander("Edge / What they do", expanded=True):
-            st.markdown(_md_text(_get_val(profile_row, "Edge / What they do")), unsafe_allow_html=True)
-    with r2c3:
-        with st.expander("Portfolio", expanded=True):
-            st.markdown(_md_text(_get_val(profile_row, "Portfolio")), unsafe_allow_html=True)
+        r2c1, r2c2, r2c3 = st.columns(3)
+        with r2c1:
+            with st.expander("Team Background", expanded=True):
+                st.markdown(_md_text(_get_val(profile_row, "Team Background")), unsafe_allow_html=True)
+        with r2c2:
+            with st.expander("Edge / What they do", expanded=True):
+                st.markdown(_md_text(_get_val(profile_row, "Edge / What they do")), unsafe_allow_html=True)
+        with r2c3:
+            with st.expander("Portfolio", expanded=True):
+                st.markdown(_md_text(_get_val(profile_row, "Portfolio")), unsafe_allow_html=True)
 
-    st.markdown("---")
+        st.markdown("---")
 
-    # ===== Cumulative Return + AUM history =====
-    hc1, hc2 = st.columns(2)
-    with hc1:
-        st.subheader("Cumulative Performance")
-        track_record = fetch_track_record_json(selected_canonical_id)
-        if track_record and isinstance(track_record.get("returns"), list):
-            returns_df = pd.DataFrame(track_record["returns"])
-            if "date" not in returns_df.columns or "return" not in returns_df.columns:
-                if {"date", "ret"} <= set(returns_df.columns):
-                    returns_df = returns_df.rename(columns={"ret": "return"})
-                elif {"date", "value"} <= set(returns_df.columns):
-                    returns_df = returns_df.rename(columns={"value": "return"})
-            if {"date", "return"} <= set(returns_df.columns):
-                returns_df["date"] = pd.to_datetime(returns_df["date"], errors="coerce")
-                returns_df["return"] = pd.to_numeric(returns_df["return"], errors="coerce")
-                returns_df = returns_df.dropna(subset=["date", "return"]).sort_values("date")
-                if not returns_df.empty:
-                    returns_df["cum"] = (1.0 + returns_df["return"]).cumprod() - 1.0
-                    ch = (
-                        alt.Chart(returns_df)
-                        .mark_line(point=True)
-                        .encode(
-                            x=alt.X("date:T", title="Date"),
-                            y=alt.Y("cum:Q", title="Cumulative Return", axis=alt.Axis(format="~%")),
-                            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("cum:Q", title="Cumulative", format=".2%")],
+        # ===== Cumulative Return + AUM history =====
+        hc1, hc2 = st.columns(2)
+        with hc1:
+            st.subheader("Cumulative Performance")
+            track_record = fetch_track_record_json(selected_canonical_id)
+            if track_record and isinstance(track_record.get("returns"), list):
+                returns_df = pd.DataFrame(track_record["returns"])
+                if "date" not in returns_df.columns or "return" not in returns_df.columns:
+                    if {"date", "ret"} <= set(returns_df.columns):
+                        returns_df = returns_df.rename(columns={"ret": "return"})
+                    elif {"date", "value"} <= set(returns_df.columns):
+                        returns_df = returns_df.rename(columns={"value": "return"})
+                if {"date", "return"} <= set(returns_df.columns):
+                    returns_df["date"] = pd.to_datetime(returns_df["date"], errors="coerce")
+                    returns_df["return"] = pd.to_numeric(returns_df["return"], errors="coerce")
+                    returns_df = returns_df.dropna(subset=["date", "return"]).sort_values("date")
+                    if not returns_df.empty:
+                        returns_df["cum"] = (1.0 + returns_df["return"]).cumprod() - 1.0
+                        ch = (
+                            alt.Chart(returns_df)
+                            .mark_line(point=True)
+                            .encode(
+                                x=alt.X("date:T", title="Date"),
+                                y=alt.Y("cum:Q", title="Cumulative Return", axis=alt.Axis(format="~%")),
+                                tooltip=[alt.Tooltip("date:T"), alt.Tooltip("cum:Q", title="Cumulative", format=".2%")],
+                            )
+                            .properties(height=350)
                         )
-                        .properties(height=350)
-                    )
-                    st.altair_chart(ch, use_container_width=True)
+                        st.altair_chart(ch, use_container_width=True)
+                else:
+                    st.info("No return series available.")
             else:
                 st.info("No return series available.")
-        else:
-            st.info("No return series available.")
 
-    with hc2:
-        st.subheader("Historical AUM")
-        aum_hist = fund_df.copy()
-        aum_hist["date"] = pd.to_datetime(aum_hist["date"], errors="coerce")
-        aum_hist["aum_fund_num"] = aum_hist.get("aum_fund", np.nan).apply(aum_to_float) if "aum_fund" in aum_hist.columns else np.nan
-        aum_hist = (
-            aum_hist.dropna(subset=["date", "aum_fund_num"])
-            .sort_values("date")
-            .drop_duplicates(subset=["date"], keep="last")
-            .rename(columns={"aum_fund_num": "AUM"})
-        )
-        if aum_hist.empty:
-            st.info("No AUM history available.")
-        else:
-            ch = (
-                alt.Chart(aum_hist)
-                .mark_line(point=True)
-                .encode(
-                    x=alt.X("date:T", title="Date"),
-                    y=alt.Y("AUM:Q", title="AUM", axis=alt.Axis(format=",.0f")),
-                    tooltip=[alt.Tooltip("date:T", title="Date"), alt.Tooltip("AUM:Q", title="AUM", format=",.0f")],
-                )
-                .properties(height=350)
+        with hc2:
+            st.subheader("Historical AUM")
+            aum_hist = fund_df.copy()
+            aum_hist["date"] = pd.to_datetime(aum_hist["date"], errors="coerce")
+            aum_hist["aum_fund_num"] = aum_hist.get("aum_fund", np.nan).apply(aum_to_float) if "aum_fund" in aum_hist.columns else np.nan
+            aum_hist = (
+                aum_hist.dropna(subset=["date", "aum_fund_num"])
+                .sort_values("date")
+                .drop_duplicates(subset=["date"], keep="last")
+                .rename(columns={"aum_fund_num": "AUM"})
             )
-            st.altair_chart(ch, use_container_width=True)
-
-
-
-    # --------------------------------
-    # Tab 2: Exposures  (keep everything except historical AUM/returns)
-    # --------------------------------
-    with tabs[1]:
-        dates = sorted(fund_df["date"].dropna().unique().tolist(), reverse=True)
-        if not dates:
-            st.warning("No dates available for this fund.")
-            return
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            date_choice = st.selectbox("Select Date", dates, key="fm_date_select")
-        with c2:
-            file_types = fund_df["file_type"].dropna().unique().tolist() if "file_type" in fund_df.columns else []
-            if file_types:
-                file_type = st.selectbox("Select file type", file_types, key="fm_filetype_select")
-                filtered_row = fund_df[(fund_df["date"] == date_choice) & (fund_df["file_type"] == file_type)]
+            if aum_hist.empty:
+                st.info("No AUM history available.")
             else:
-                filtered_row = fund_df[(fund_df["date"] == date_choice)]
-        if filtered_row.empty:
-            st.warning("No records found for the selected date and file type.")
-            return
-        row = filtered_row.iloc[0]
-
-        # headline metrics
-        mcols = st.columns(5)
-        mcols[0].metric("AUM", row.get("aum_fund") or row.get("aum_firm"))
-        mcols[1].metric("Net", row.get("net"))
-        mcols[2].metric("Gross", row.get("gross"))
-        mcols[3].metric("Long", row.get("long"))
-        mcols[4].metric("Short", row.get("short"))
-
-        # last summary + positions
-        st.subheader("Last Summary & Positions")
-        sc1, sc2 = st.columns([3, 1])
-        with sc1:
-            bullets, repdate = [], None
-            letters = _load_letters()
-            if (
-                not letters.empty
-                and {"fund_id", "report_date", "letter_summary_5_bullets"} <= set(letters.columns)
-            ):
-                fl = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
-                fl["report_date"] = pd.to_datetime(fl["report_date"], errors="coerce")
-                if fl["report_date"].notna().any():
-                    repdate = fl["report_date"].max()
-                    bullets = _split_bullets(fl.loc[fl["report_date"] == repdate, "letter_summary_5_bullets"].iloc[0])
-            if bullets:
-                st.markdown(f"**Latest report:** {repdate.date() if repdate is not None else ''}")
-                for b in bullets:
-                    st.markdown(f"- {b}")
-            else:
-                st.info("No recent summary available.")
-
-        with sc2:
-            st.markdown("**Top 10 Positions**")
-            letters = _load_letters()
-            if letters.empty or not {"fund_id", "report_date", "position_ticker", "position_weight_percent"} <= set(letters.columns):
-                st.info("No positions available.")
-            else:
-                dfp = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
-                dfp["report_date"] = pd.to_datetime(dfp["report_date"], errors="coerce")
-                if dfp.empty or dfp["report_date"].dropna().empty:
-                    st.info("No positions available.")
-                else:
-                    latest_rd = dfp["report_date"].max()
-                    dfp = dfp[dfp["report_date"] == latest_rd].copy()
-                    for c in ["position_name", "position_sector"]:
-                        if c not in dfp.columns:
-                            dfp[c] = None
-                    view = dfp[["position_name", "position_ticker", "position_sector", "position_weight_percent"]].rename(
-                        columns={
-                            "position_name": "Position Name",
-                            "position_ticker": "Position Ticker",
-                            "position_sector": "Position Sector",
-                            "position_weight_percent": "Position Weight (%)",
-                        }
-                    ).copy()
-                    view["Position Weight (%)"] = pd.to_numeric(view["Position Weight (%)"], errors="coerce")
-                    view = view.dropna(subset=["Position Ticker"]).sort_values("Position Weight (%)", ascending=False).head(10)
-                    st.dataframe(_arrow_safe(view), use_container_width=True)
-
-        # exposures tables
-        st.subheader("Exposures")
-        sector_keys = ["sector_long", "sector_short", "sector_gross", "sector_net"]
-        geo_keys = ["geo_long", "geo_short", "geo_gross", "geo_net"]
-        ec1, ec2 = st.columns(2)
-        if all(k in row.index for k in sector_keys):
-            with ec1:
-                st.markdown("**Sector Exposures**")
-                sector_df = build_exposure_df(row, sector_keys)
-                st.dataframe(_arrow_safe(_format_exposure_table(sector_df).data), use_container_width=True)
-        if all(k in row.index for k in geo_keys):
-            with ec2:
-                st.markdown("**Geographical Exposures**")
-                geo_df = build_exposure_df(row, geo_keys)
-                st.dataframe(_arrow_safe(_format_exposure_table(geo_df).data), use_container_width=True)
-
-        # net/gross time series (kept here)
-        if {"date", "net", "gross"} <= set(fund_df.columns):
-            hist_df = fund_df[["date", "net", "gross"]].copy()
-            hist_df["date"] = pd.to_datetime(hist_df["date"], errors="coerce")
-            def _pct(x):
-                x = str(x)
-                return float(x.replace("%", "")) if "%" in x else pd.to_numeric(x, errors="coerce")
-            hist_df["net"] = hist_df["net"].apply(_pct)
-            hist_df["gross"] = hist_df["gross"].apply(_pct)
-            hist_df = hist_df.dropna(subset=["date", "net", "gross"]).sort_values("date")
-            if not hist_df.empty:
                 ch = (
-                    alt.Chart(hist_df)
-                    .transform_fold(["net", "gross"], as_=["Exposure", "Value"])
+                    alt.Chart(aum_hist)
                     .mark_line(point=True)
                     .encode(
                         x=alt.X("date:T", title="Date"),
-                        y=alt.Y("Value:Q", title="Exposure"),
-                        color=alt.Color("Exposure:N", title="Type"),
-                        tooltip=[alt.Tooltip("date:T"), alt.Tooltip("Exposure:N"), alt.Tooltip("Value:Q")],
+                        y=alt.Y("AUM:Q", title="AUM", axis=alt.Axis(format=",.0f")),
+                        tooltip=[alt.Tooltip("date:T", title="Date"), alt.Tooltip("AUM:Q", title="AUM", format=",.0f")],
                     )
                     .properties(height=350)
                 )
                 st.altair_chart(ch, use_container_width=True)
-
-    # --------------------------------
-    # Tab 3: Quant
-    # --------------------------------
-    with tabs[2]:
-        st.info("Quant analytics placeholder.")
+    # ==================== END OVERVIEW TAB ====================
 
 
 
