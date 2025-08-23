@@ -204,15 +204,21 @@ def build_exposure_df(row: pd.Series, prefixes: List[str]) -> pd.DataFrame:
         parts.append(df)
     return pd.concat(parts, axis=1)
 
+st.caption("Service account email used for Sheets:")
+try:
+    client = get_gspread_client()  # :contentReference[oaicite:3]{index=3}
+    st.code(getattr(client.auth, "service_account_email", "unknown"))
+except Exception:
+    st.code("unavailable")
 
 
-# === New page: Fund Database ===
+# === New page: Fund Database ===  # :contentReference[oaicite:0]{index=0}
 def show_fund_database() -> None:
     st.header("Fund Database")
 
     tabs = st.tabs(["Overview", "Dilligence", "Liquidity Terms"])
 
-    # --- Tab 1: Overview (editable + Google Sheets sync) ---
+    # --- Tab 1: Overview ---
     with tabs[0]:
         if not ("fund_database" in st.secrets and "sheet_id" in st.secrets["fund_database"]):
             st.error("Missing 'fund_database' configuration in secrets.")
@@ -220,26 +226,31 @@ def show_fund_database() -> None:
         sheet_id = st.secrets["fund_database"]["sheet_id"]
         worksheet = st.secrets["fund_database"].get("worksheet", "fund database")
 
-        # Load
-        df = load_sheet(sheet_id, worksheet)  # :contentReference[oaicite:2]{index=2}
+        # Load full sheet  :contentReference[oaicite:1]{index=1}
+        df = load_sheet(sheet_id, worksheet)
         if df.empty:
             st.warning("No rows found in the 'fund database' sheet.")
             df = pd.DataFrame()
 
         # Filters
-        f1, f2 = st.columns(2)
+        f1, f2, f3 = st.columns(3)
         with f1:
             macro_vals = sorted(df["Brightside Macro"].dropna().unique().tolist()) if "Brightside Macro" in df.columns else []
             sel_macro = st.multiselect("Brightside Macro", macro_vals, default=[])
         with f2:
             status_vals = sorted(df["Status"].dropna().unique().tolist()) if "Status" in df.columns else []
             sel_status = st.multiselect("Status", status_vals, default=[])
+        with f3:
+            asset_vals = sorted(df["Asset Class"].dropna().unique().tolist()) if "Asset Class" in df.columns else []
+            sel_asset = st.multiselect("Asset Class", asset_vals, default=[])
 
         filtered = df.copy()
         if sel_macro and "Brightside Macro" in filtered.columns:
             filtered = filtered[filtered["Brightside Macro"].isin(sel_macro)]
         if sel_status and "Status" in filtered.columns:
             filtered = filtered[filtered["Status"].isin(sel_status)]
+        if sel_asset and "Asset Class" in filtered.columns:
+            filtered = filtered[filtered["Asset Class"].isin(sel_asset)]
 
         # Visible columns only
         visible_cols = [
@@ -256,8 +267,8 @@ def show_fund_database() -> None:
         display_df = filtered[show_cols].copy() if show_cols else filtered.copy()
 
         # Top-right save button
-        c_left, c_right = st.columns([1, 0.18])
-        with c_right:
+        top_l, top_r = st.columns([1, 0.18])
+        with top_r:
             do_save = st.button("save changes", type="primary", use_container_width=True)
 
         # Editable grid
@@ -276,10 +287,10 @@ def show_fund_database() -> None:
         )
         edited_df = pd.DataFrame(grid["data"])
 
-        # Persist (overwrite sheet with edited grid content)
+        # Persist: overwrite worksheet with the edited view
         if do_save:
             try:
-                client = get_gspread_client()  # :contentReference[oaicite:3]{index=3}
+                client = get_gspread_client()  # :contentReference[oaicite:2]{index=2}
                 sh = client.open_by_key(sheet_id)
                 ws = sh.worksheet(worksheet)
                 values = [edited_df.columns.tolist()] + edited_df.fillna("").astype(str).values.tolist()
@@ -289,14 +300,11 @@ def show_fund_database() -> None:
             except Exception as exc:
                 st.error(f"Failed to save to Google Sheet: {exc}")
 
-    # --- Tab 2: Dilligence ---
     with tabs[1]:
         st.info("Add content here.")
 
-    # --- Tab 3: Liquidity Terms ---
     with tabs[2]:
         st.info("Add content here.")
-
 
 
 # ---- Existing product pages (kept as-is) ----
