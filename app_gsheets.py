@@ -2190,77 +2190,118 @@ import base64
 def main() -> None:
     st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
 
-    # --- Inject custom CSS ---
-    st.markdown("""
+    # ---------- Global style overrides ----------
+    st.markdown(
+        """
         <style>
         /* Sidebar background */
         [data-testid="stSidebar"] {
-            background-color: #1d2533; /* dark blue from screenshot */
+            background-color: #1d2533 !important; /* dark blue */
         }
-        /* Remove icons and borders in option menu */
-        ul.nav.nav-pills {
-            border: none !important;
+        /* Remove the white card look in the sidebar area */
+        [data-testid="stSidebar"] .block-container {
+            padding-top: 8px;
+            background: transparent !important;
         }
-        ul.nav.nav-pills li a {
-            color: white !important;
-            border: none !important;
-        }
-        ul.nav.nav-pills li a:hover {
-            background-color: rgba(255,255,255,0.1) !important;
-            color: white !important;
-        }
-        ul.nav.nav-pills li a.active {
-            background-color: rgba(255,255,255,0.15) !important;
-            color: white !important;
-        }
-        /* Change clicked/active link color on content pages */
-        a, a:visited, a:active {
-            color: #0066ff !important;  /* blue instead of red */
-        }
-        .stTabs [role="tab"][aria-selected="true"] {
-            color: #0066ff !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
 
-    # --- Add logo to sidebar ---
-    logo_path = "logo_bs.png"  # file uploaded
-    with open(logo_path, "rb") as f:
-        data = f.read()
-    b64 = base64.b64encode(data).decode("utf-8")
-    st.sidebar.markdown(
-        f"""
-        <div style="text-align:center;padding:10px 0;">
-            <img src="data:image/png;base64,{b64}" width="180">
-        </div>
+        /* Logo sizing and spacing (50% smaller, extra gap before menu) */
+        .sidebar-logo { text-align: center; padding: 12px 0 36px 0; }
+        .sidebar-logo img { width: 90px; height: auto; } /* ~50% of previous ~180px */
+
+        /* Streamlit Option Menu cleanup */
+        ul.nav.nav-pills, ul.nav.nav-pills li { list-style: none !important; }
+        ul.nav.nav-pills { border: none !important; background: transparent !important; padding-left: 0 !important; }
+        ul.nav.nav-pills li a {
+            background: transparent !important;
+            border: none !important;
+            color: #ffffff !important;               /* clean white text */
+            padding: 6px 0 !important;
+            margin: 2px 0 !important;
+            box-shadow: none !important;
+        }
+        /* remove any icon spans that option_menu may render */
+        ul.nav.nav-pills li a > span:first-child { display: none !important; }
+        /* no hover background, keep text white */
+        ul.nav.nav-pills li a:hover { background: transparent !important; color: #ffffff !important; }
+        /* selected item: blue text (no red, no background) */
+        ul.nav.nav-pills li a.active { background: transparent !important; color: #1e6bff !important; }
+
+        /* Global “primary” accents (buttons, sliders, widgets) -> blue */
+        :root { --primary-color: #1e6bff; }
+        .stButton button { background-color: #1e6bff !important; border-color: #1e6bff !important; }
+        .stSlider [role="slider"] { background-color: #1e6bff !important; }
+        input[type="checkbox"], input[type="radio"] { accent-color: #1e6bff !important; }
+        .stTextInput > div > div > input:focus, .stSelectbox [data-baseweb="select"] div:focus {
+            border-color: #1e6bff !important;
+            box-shadow: 0 0 0 1px #1e6bff !important;
+        }
+
+        /* Tabs: active tab blue instead of red */
+        .stTabs [role="tab"][aria-selected="true"] {
+            color: #1e6bff !important;
+            border-bottom: 2px solid #1e6bff !important;
+        }
+
+        /* Links in content: blue */
+        a, a:visited, a:active { color: #1e6bff !important; }
+        </style>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
-    # --- Sidebar menu ---
+    # ---------- Sidebar logo ----------
+    try:
+        logo_path = "logo_bs.png"  # uploaded file
+        with open(logo_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        st.sidebar.markdown(
+            f'<div class="sidebar-logo"><img src="data:image/png;base64,{b64}" alt="logo"></div>',
+            unsafe_allow_html=True,
+        )
+    except Exception:
+        pass  # fail silently if the asset isn't present in a given environment
+
+    # ---------- Sidebar navigation ----------
     with st.sidebar:
         page = option_menu(
-            None,  # remove title text
+            None,
             ["Fund Database", "Fund Monitor", "Performance Est", "Market Views", "Market Analytics"],
             default_index=0,
             orientation="vertical",
-            icons=[None]*5  # no icons
+            icons=[""] * 5,  # no icons
+            styles={
+                "container": {"padding": "0", "background": "transparent"},
+                "nav": {"padding": "0", "margin": "0"},
+                "nav-link": {"font-size": "16px", "text-align": "left"},
+                "nav-link-selected": {"color": "#1e6bff", "background": "transparent"},
+            },
         )
 
+    # ---------- Page router (unchanged) ----------
     if page == "Fund Database":
         st.header("Fund Database")
         show_fund_database()
     elif page == "Performance Est":
         st.header("Performance Estimates")
+        st.write("Performance estimates are sent by hedge funds to investment.coverage@brightside-capital.com.")
+        st.write("Automation and data extraction from emails happens via n8n and ChatGPT API.")
+        st.write("Data stored in a cloud drive and pulled in below.")
         show_performance_view()
     elif page == "Market Views":
-        st.header("Market Views")
+        st.write("## Fund Positions and Investment Thesis")
+        st.write("Latest manager portfolio positions are extracted from fund letters, factsheets using LLMs and investment thesis performance are tracked.")
+        st.write("Automatic PDF extraction when files are received via n8n workflowand ChatGPT API.")
+        st.write("Data stored in a cloud drive and pulled in/transformed below.")
         show_market_view()
     elif page == "Fund Monitor":
         st.header("Fund Monitor")
+        st.write("Fund data received via email attachments (pdf) are stored in a cloud drive.")
+        st.write("Exposures, historical returns and other metrics are extracted using the ChatGPT API inside the n8n workflow.")
+        st.write("Data stored in a cloud drive and pulled in/transformed below.")
         show_fund_monitor()
     elif page == "Market Analytics":
         st.header("Market Analytics")
+        st.write("The idea here is to build a collection of market signals and indicators that provide the AI model with current market context i.e. what is going on? in order to connext the dots.")
         show_market_analytics()
 
 if __name__ == "__main__":
