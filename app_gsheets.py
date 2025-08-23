@@ -1320,46 +1320,59 @@ def show_fund_monitor() -> None:
                 unsafe_allow_html=True,
             )
 
-        # Top rows to mirror screenshot
-        r0c1, r0c2, r0c3, r0c4 = st.columns([1, 1, 1, 2])
-        with r0c1: _metric_cell("Fund Name", _get_val(profile_row, "Fund Name", fund_choice))
-        with r0c2: _metric_cell("Asset Class", _get_val(profile_row, "Asset Class"))
-        with r0c3: _metric_cell("Type", _get_val(profile_row, "Type"))
-        with r0c4: _metric_cell("Summary", _get_val(profile_row, "Summary"))
+        # ===== Top row: Fund Name + Summary =====
+        t1, t2 = st.columns([1, 2])
+        with t1:
+            st.markdown(
+                f"<div style='font-size:28px;font-weight:700;line-height:1.1'>{_get_val(profile_row, 'Fund Name', fund_choice)}</div>",
+                unsafe_allow_html=True,
+            )
+        with t2:
+            st.markdown(_get_val(profile_row, "Summary") or " ")
 
-        r1c1, r1c2, r1c3, r1c4, r1c5 = st.columns(5)
-        with r1c1: _metric_cell("Size", _get_val(profile_row, "AUM (in USD Millions)"))
-        with r1c2: _metric_cell("Time Horizon", _get_val(profile_row, "Time Horizon"))
-        with r1c3: _metric_cell("Style", _get_val(profile_row, "Style"))
-        with r1c4: _metric_cell("Geo", _get_val(profile_row, "Geo"))
-        with r1c5: _metric_cell("Sector", _get_val(profile_row, "Sector"))
+        # ===== Scorecards (same as before, minus Fund Name/Summary) =====
+        m1c1, m1c2 = st.columns(2)
+        with m1c1: _metric_cell("Asset Class", _get_val(profile_row, "Asset Class"))
+        with m1c2: _metric_cell("Type", _get_val(profile_row, "Type"))
 
-        r2 = st.columns(6)
-        with r2[0]: _metric_cell("Avg # Positions", _get_val(profile_row, "Avg # Positions"))
-        with r2[1]: _metric_cell("Avg Gross", _get_val(profile_row, "Avg Gross"))
-        with r2[2]: _metric_cell("Avg Net", _get_val(profile_row, "Avg Net"))
-        with r2[3]: _metric_cell("Management Fee", _get_val(profile_row, "Management Fee"))
-        with r2[4]: _metric_cell("Performance Fee", _get_val(profile_row, "Performance Fee"))
-        with r2[5]: _metric_cell("Inception", _get_val(profile_row, "Inception"))
+        m2c1, m2c2, m2c3, m2c4, m2c5 = st.columns(5)
+        with m2c1: _metric_cell("Size", _get_val(profile_row, "AUM (in USD Millions)"))
+        with m2c2: _metric_cell("Time Horizon", _get_val(profile_row, "Time Horizon"))
+        with m2c3: _metric_cell("Style", _get_val(profile_row, "Style"))
+        with m2c4: _metric_cell("Geo", _get_val(profile_row, "Geo"))
+        with m2c5: _metric_cell("Sector", _get_val(profile_row, "Sector"))
 
-        ec = st.columns(3)
-        with ec[0]:
-            with st.expander("Market Opportunity", expanded=False):
-                st.write(_get_val(profile_row, "Market Opportunity"))
-            with st.expander("Risks", expanded=False):
-                st.write(_get_val(profile_row, "Risks"))
-        with ec[1]:
-            with st.expander("Team Background", expanded=False):
-                st.write(_get_val(profile_row, "Team Background"))
-            with st.expander("Edge / What they do", expanded=False):
-                st.write(_get_val(profile_row, "Edge / What they do"))
-        with ec[2]:
-            with st.expander("Portfolio", expanded=False):
-                st.write(_get_val(profile_row, "Portfolio"))
+        m3 = st.columns(6)
+        with m3[0]: _metric_cell("Avg # Positions", _get_val(profile_row, "Avg # Positions"))
+        with m3[1]: _metric_cell("Avg Gross", _get_val(profile_row, "Avg Gross"))
+        with m3[2]: _metric_cell("Avg Net", _get_val(profile_row, "Avg Net"))
+        with m3[3]: _metric_cell("Management Fee", _get_val(profile_row, "Management Fee"))
+        with m3[4]: _metric_cell("Performance Fee", _get_val(profile_row, "Performance Fee"))
+        with m3[5]: _metric_cell("Inception", _get_val(profile_row, "Inception"))
+
+        # ===== Narrative sections (no expanders) =====
+        r1c1, r1c2 = st.columns(2)
+        with r1c1:
+            st.subheader("Market Opportunity")
+            st.write(_get_val(profile_row, "Market Opportunity") or "")
+        with r1c2:
+            st.subheader("Risks")
+            st.write(_get_val(profile_row, "Risks") or "")
+
+        r2c1, r2c2, r2c3 = st.columns(3)
+        with r2c1:
+            st.subheader("Team Background")
+            st.write(_get_val(profile_row, "Team Background") or "")
+        with r2c2:
+            st.subheader("Edge / What they do")
+            st.write(_get_val(profile_row, "Edge / What they do") or "")
+        with r2c3:
+            st.subheader("Portfolio")
+            st.write(_get_val(profile_row, "Portfolio") or "")
 
         st.markdown("---")
 
-        # ---- Cumulative Return + AUM history (moved here) ----
+        # ===== Cumulative Return + AUM history =====
         hc1, hc2 = st.columns(2)
 
         with hc1:
@@ -1419,6 +1432,8 @@ def show_fund_monitor() -> None:
                     .properties(height=350)
                 )
                 st.altair_chart(ch, use_container_width=True)
+
+
 
     # --------------------------------
     # Tab 2: Exposures  (keep everything except historical AUM/returns)
