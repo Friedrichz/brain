@@ -208,10 +208,11 @@ def build_exposure_df(row: pd.Series, prefixes: List[str]) -> pd.DataFrame:
 
 # === New page: Fund Database ===
 def show_fund_database() -> None:
+    st.header("Fund Database")
 
     tabs = st.tabs(["Overview", "Dilligence", "Liquidity Terms"])
 
-    # --- Tab 1: Overview (Google Sheet <-> Streamlit editable grid) ---
+    # --- Tab 1: Overview (editable + Google Sheets sync) ---
     with tabs[0]:
         if not ("fund_database" in st.secrets and "sheet_id" in st.secrets["fund_database"]):
             st.error("Missing 'fund_database' configuration in secrets.")
@@ -219,38 +220,68 @@ def show_fund_database() -> None:
         sheet_id = st.secrets["fund_database"]["sheet_id"]
         worksheet = st.secrets["fund_database"].get("worksheet", "fund database")
 
-        # Load current data (reuses existing helpers):contentReference[oaicite:1]{index=1}
-        df = load_sheet(sheet_id, worksheet)
+        # Load
+        df = load_sheet(sheet_id, worksheet)  # :contentReference[oaicite:2]{index=2}
         if df.empty:
             st.warning("No rows found in the 'fund database' sheet.")
             df = pd.DataFrame()
 
-        st.caption("Edit cells in-place. Click 'Save changes to Google Sheet' to persist.")
+        # Filters
+        f1, f2 = st.columns(2)
+        with f1:
+            macro_vals = sorted(df["Brightside Macro"].dropna().unique().tolist()) if "Brightside Macro" in df.columns else []
+            sel_macro = st.multiselect("Brightside Macro", macro_vals, default=[])
+        with f2:
+            status_vals = sorted(df["Status"].dropna().unique().tolist()) if "Status" in df.columns else []
+            sel_status = st.multiselect("Status", status_vals, default=[])
 
-        # Build editable grid
-        gb = GridOptionsBuilder.from_dataframe(df if not df.empty else pd.DataFrame(columns=[""]))
+        filtered = df.copy()
+        if sel_macro and "Brightside Macro" in filtered.columns:
+            filtered = filtered[filtered["Brightside Macro"].isin(sel_macro)]
+        if sel_status and "Status" in filtered.columns:
+            filtered = filtered[filtered["Status"].isin(sel_status)]
+
+        # Visible columns only
+        visible_cols = [
+            "Fund Name",
+            "Manager",
+            "Asset Class",
+            "Type",
+            "Management Fee",
+            "Performance Fee",
+            "Inception",
+            "AUM (in USD Millions)",
+        ]
+        show_cols = [c for c in visible_cols if c in filtered.columns]
+        display_df = filtered[show_cols].copy() if show_cols else filtered.copy()
+
+        # Top-right save button
+        c_left, c_right = st.columns([1, 0.18])
+        with c_right:
+            do_save = st.button("save changes", type="primary", use_container_width=True)
+
+        # Editable grid
+        gb = GridOptionsBuilder.from_dataframe(display_df if not display_df.empty else pd.DataFrame(columns=[""]))
         gb.configure_default_column(editable=True, resizable=True, filter=True)
         gb.configure_grid_options(rowSelection="single")
         grid = AgGrid(
-            df,
+            display_df,
             gridOptions=gb.build(),
             theme="streamlit",
             enable_enterprise_modules=False,
             allow_unsafe_jscode=False,
             fit_columns_on_grid_load=True,
-            update_mode="MODEL_CHANGED",   # capture edits as they occur
+            update_mode="MODEL_CHANGED",
             reload_data=False,
         )
-
         edited_df = pd.DataFrame(grid["data"])
 
-        # Save button: overwrite the worksheet with current grid contents
-        if st.button("Save changes to Google Sheet", type="primary", use_container_width=False):
+        # Persist (overwrite sheet with edited grid content)
+        if do_save:
             try:
-                client = get_gspread_client()            # existing auth helper:contentReference[oaicite:2]{index=2}
+                client = get_gspread_client()  # :contentReference[oaicite:3]{index=3}
                 sh = client.open_by_key(sheet_id)
                 ws = sh.worksheet(worksheet)
-                # Overwrite all: header + values
                 values = [edited_df.columns.tolist()] + edited_df.fillna("").astype(str).values.tolist()
                 ws.clear()
                 ws.update("A1", values, value_input_option="USER_ENTERED")
@@ -258,13 +289,14 @@ def show_fund_database() -> None:
             except Exception as exc:
                 st.error(f"Failed to save to Google Sheet: {exc}")
 
-    # --- Tab 2: Dilligence (placeholder) ---
+    # --- Tab 2: Dilligence ---
     with tabs[1]:
         st.info("Add content here.")
 
-    # --- Tab 3: Liquidity Terms (placeholder) ---
+    # --- Tab 3: Liquidity Terms ---
     with tabs[2]:
         st.info("Add content here.")
+
 
 
 # ---- Existing product pages (kept as-is) ----
