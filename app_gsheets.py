@@ -211,7 +211,7 @@ def show_fund_database() -> None:
     import streamlit as st
     from st_aggrid import AgGrid, GridOptionsBuilder
 
-    tabs = st.tabs(["Overview", "Liquidity & Ops"])
+    tabs = st.tabs(["Overview", "Liquidity & Ops", "Uploads"])
 
     # --- Tab 1: Overview (editable, non-destructive save) ---
     with tabs[0]:
@@ -407,6 +407,37 @@ def show_fund_database() -> None:
         )
 
 
+    # --- Tab 3: Uploads (push to Google Drive) ---
+    with tabs[2]:
+        st.subheader("Upload supporting documents")
+
+        uploaded = st.file_uploader("Choose a file")
+        if uploaded is not None:
+            from googleapiclient.http import MediaIoBaseUpload
+            from io import BytesIO
+            try:
+                svc = _drive_client()
+                target_parent_id = st.secrets["drive"]["upload_subfolder_id"]
+
+                media = MediaIoBaseUpload(
+                    BytesIO(uploaded.getvalue()),
+                    mimetype=(uploaded.type or "application/octet-stream"),
+                    resumable=True,
+                )
+                file_meta = {"name": uploaded.name, "parents": [target_parent_id]}
+                created = svc.files().create(
+                    body=file_meta,
+                    media_body=media,
+                    fields="id, name, webViewLink",
+                    supportsAllDrives=True,
+                ).execute()
+
+                st.success(f"Uploaded: {created['name']}")
+                st.markdown(f"[Open in Google Drive]({created['webViewLink']})")
+
+            except Exception as exc:
+                st.error(f"Upload failed: {exc}")
+                            
 # ---- Existing product pages (kept as-is) ----
 
 def show_performance_view() -> None:
