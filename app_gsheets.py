@@ -1210,8 +1210,10 @@ def _fm_aum_to_float(x):
         return np.nan
 
 # ---------- Sheet aliases (include exact narrative labels you confirmed) ----------
+# ===== PATCH 1: Update aliases (ensure this dict includes Manager Name) =====
 _FM_ALIASES = {
     "Fund Name": ["Fund Name", "Name", "Fund"],
+    "Manager Name": ["Manager", "Manager Name", "Fund Manager", "Portfolio Manager", "PM"],
     "Asset Class": ["Asset Class"],
     "Type": ["Type", "Strategy Type"],
     "Summary": ["Summary"],
@@ -1226,7 +1228,6 @@ _FM_ALIASES = {
     "Management Fee": ["Management Fee", "Mgmt Fee"],
     "Performance Fee": ["Performance Fee", "Perf Fee", "Incentive Fee"],
     "Inception": ["Inception", "Inception Year", "Launch"],
-    # narratives — exact labels per your sheet
     "Market Opportunity": ["Market Opportunity"],
     "Team Background": ["Team Background"],
     "Edge / What they do": ["Edge / What they do", "Edge/ What they do", "Edge/What they do"],
@@ -1356,7 +1357,6 @@ def show_fund_monitor() -> None:
     # --------------------------------
     # ====================== OVERVIEW TAB (drop-in replacement) ======================
     with tabs[0]:
-        # ---- Load profile row from Fund Database ----
         profile_row = None
         try:
             if "fund_database" in st.secrets and "sheet_id" in st.secrets["fund_database"]:
@@ -1370,18 +1370,21 @@ def show_fund_monitor() -> None:
 
         spacer = lambda h=12: st.markdown(f"<div style='height:{h}px'></div>", unsafe_allow_html=True)
 
-        # ===== Row 0: Fund Name + Summary (both as scorecards) =====
-        t1, t2 = st.columns([1, 2])
+        # ===== Row 0: Fund Name (big), Summary (multiline), Inception (top-right) =====
+        t1, t2, t3 = st.columns([1, 2, 1])
         with t1:
             _fm_scorecard("Fund Name", _fm_get_val(profile_row, "Fund Name", fund_choice), big=True)
         with t2:
             _fm_scorecard("Summary", _fm_get_val(profile_row, "Summary"), multiline=True)
+        with t3:
+            _fm_scorecard("Inception", _fm_get_val(profile_row, "Inception"))
         spacer(12)
 
-        # ===== Row 1: Asset Class, Type =====
-        r1c1, r1c2 = st.columns(2)
+        # ===== Row 1: Asset Class, Type, Manager Name =====
+        r1c1, r1c2, r1c3 = st.columns(3)
         with r1c1: _fm_scorecard("Asset Class", _fm_get_val(profile_row, "Asset Class"))
         with r1c2: _fm_scorecard("Type", _fm_get_val(profile_row, "Type"))
+        with r1c3: _fm_scorecard("Manager Name", _fm_get_val(profile_row, "Manager Name"))
         spacer(12)
 
         # ===== Row 2: Size, Time Horizon, Style, Geo, Sector =====
@@ -1393,17 +1396,16 @@ def show_fund_monitor() -> None:
         with r2c5: _fm_scorecard("Sector", _fm_get_val(profile_row, "Sector"))
         spacer(12)
 
-        # ===== Row 3: Avg # Positions, Avg Gross, Avg Net, Mgmt Fee, Perf Fee, Inception =====
-        r3 = st.columns(6)
-        with r3[0]: _fm_scorecard("Avg # Positions", _fm_get_val(profile_row, "Avg # Positions"))
-        with r3[1]: _fm_scorecard("Avg Gross", _fm_get_val(profile_row, "Avg Gross"))
-        with r3[2]: _fm_scorecard("Avg Net", _fm_get_val(profile_row, "Avg Net"))
-        with r3[3]: _fm_scorecard("Management Fee", _fm_get_val(profile_row, "Management Fee"))
-        with r3[4]: _fm_scorecard("Performance Fee", _fm_get_val(profile_row, "Performance Fee"))
-        with r3[5]: _fm_scorecard("Inception", _fm_get_val(profile_row, "Inception"))
+        # ===== Row 3: Avg # Positions, Avg Gross, Avg Net, Mgmt Fee, Perf Fee =====
+        r3c1, r3c2, r3c3, r3c4, r3c5 = st.columns(5)
+        with r3c1: _fm_scorecard("Avg # Positions", _fm_get_val(profile_row, "Avg # Positions"))
+        with r3c2: _fm_scorecard("Avg Gross", _fm_get_val(profile_row, "Avg Gross"))
+        with r3c3: _fm_scorecard("Avg Net", _fm_get_val(profile_row, "Avg Net"))
+        with r3c4: _fm_scorecard("Management Fee", _fm_get_val(profile_row, "Management Fee"))
+        with r3c5: _fm_scorecard("Performance Fee", _fm_get_val(profile_row, "Performance Fee"))
         spacer(12)
 
-        # ===== Narrative sections (expanders, expanded by default; exact labels) =====
+        # ===== Narrative sections (expanders, expanded by default) =====
         n1c1, n1c2 = st.columns(2)
         with n1c1:
             with st.expander("Market Opportunity", expanded=True):
@@ -1425,7 +1427,7 @@ def show_fund_monitor() -> None:
 
         st.markdown("---")
 
-        # ===== Cumulative Return + AUM history (unchanged) =====
+        # ===== Charts (leave your existing code below this line) =====
         hc1, hc2 = st.columns(2)
         with hc1:
             st.subheader("Cumulative Performance")
@@ -1483,7 +1485,6 @@ def show_fund_monitor() -> None:
             else:
                 st.info("No AUM history available.")
     # ==================== END OVERVIEW TAB ====================
-
 
 
 
