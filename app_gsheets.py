@@ -1424,7 +1424,7 @@ def show_fund_monitor() -> None:
         with r2c3: _fm_scorecard("Style", _fm_get_val(profile_row, "Style"))
         with r2c4: _fm_scorecard("Geo", _fm_get_val(profile_row, "Geo"))
         with r2c5: _fm_scorecard("Sector", _fm_get_val(profile_row, "Sector"))
-        with r2c6: _fm_scorecard("Universe Size", _fm_get_val(profile_row, "Size"))
+        with r2c1: _fm_scorecard("Universe Size", _fm_get_val(profile_row, "Size"))
         spacer(12)
 
         # ===== Row 3: Avg # Positions, Avg Gross, Avg Net, Mgmt Fee, Perf Fee =====
