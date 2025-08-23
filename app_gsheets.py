@@ -2183,75 +2183,55 @@ def show_market_analytics():
 
 # app_gsheets.py
 
-import streamlit as st
-from streamlit_option_menu import option_menu
 import base64
 
 def main() -> None:
     st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
 
-    # ---------- Global style overrides ----------
+    # ---------- Minimal CSS: sidebar only ----------
     st.markdown(
         """
         <style>
         /* Sidebar background */
-        [data-testid="stSidebar"] {
-            background-color: #1d2533 !important; /* dark blue */
-        }
-        /* Remove the white card look in the sidebar area */
-        [data-testid="stSidebar"] .block-container {
-            padding-top: 8px;
-            background: transparent !important;
-        }
+        [data-testid="stSidebar"] { background-color: #1d2533 !important; }
+        [data-testid="stSidebar"] .block-container { background: transparent !important; padding-top: 8px; }
 
-        /* Logo sizing and spacing (50% smaller, extra gap before menu) */
-        .sidebar-logo { text-align: center; padding: 12px 0 36px 0; }
-        .sidebar-logo img { width: 90px; height: auto; } /* ~50% of previous ~180px */
+        /* Logo: 50% smaller + more gap below */
+        .sidebar-logo { text-align:center; padding: 12px 0 40px 0; }
+        .sidebar-logo img { width: 90px; height: auto; }  /* ~half of the previous 180px */
 
-        /* Streamlit Option Menu cleanup */
-        ul.nav.nav-pills, ul.nav.nav-pills li { list-style: none !important; }
-        ul.nav.nav-pills { border: none !important; background: transparent !important; padding-left: 0 !important; }
-        ul.nav.nav-pills li a {
+        /* Custom text-only nav (buttons styled as links) */
+        [data-testid="stSidebar"] .stButton>button {
+            width: 100%;
+            text-align: left;
             background: transparent !important;
+            color: #ffffff !important;
             border: none !important;
-            color: #ffffff !important;               /* clean white text */
-            padding: 6px 0 !important;
-            margin: 2px 0 !important;
             box-shadow: none !important;
+            padding: 8px 4px;
+            margin: 2px 0;
         }
-        /* remove any icon spans that option_menu may render */
-        ul.nav.nav-pills li a > span:first-child { display: none !important; }
-        /* no hover background, keep text white */
-        ul.nav.nav-pills li a:hover { background: transparent !important; color: #ffffff !important; }
-        /* selected item: blue text (no red, no background) */
-        ul.nav.nav-pills li a.active { background: transparent !important; color: #1e6bff !important; }
-
-        /* Global “primary” accents (buttons, sliders, widgets) -> blue */
-        :root { --primary-color: #1e6bff; }
-        .stButton button { background-color: #1e6bff !important; border-color: #1e6bff !important; }
-        .stSlider [role="slider"] { background-color: #1e6bff !important; }
-        input[type="checkbox"], input[type="radio"] { accent-color: #1e6bff !important; }
-        .stTextInput > div > div > input:focus, .stSelectbox [data-baseweb="select"] div:focus {
-            border-color: #1e6bff !important;
-            box-shadow: 0 0 0 1px #1e6bff !important;
+        [data-testid="stSidebar"] .stButton>button:hover {
+            background: rgba(255,255,255,0.06) !important;
         }
+        [data-testid="stSidebar"] .stButton>button:focus { outline: none !important; box-shadow: none !important; }
 
-        /* Tabs: active tab blue instead of red */
-        .stTabs [role="tab"][aria-selected="true"] {
-            color: #1e6bff !important;
-            border-bottom: 2px solid #1e6bff !important;
+        /* Selected item = bold white text, no icons/arrows, no background */
+        .nav-item-selected {
+            color: #ffffff !important;
+            font-weight: 700;
+            padding: 8px 4px;
+            margin: 2px 0;
+            border-left: 3px solid #ffffff33;
         }
-
-        /* Links in content: blue */
-        a, a:visited, a:active { color: #1e6bff !important; }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # ---------- Sidebar logo ----------
+    # ---------- Sidebar: logo ----------
     try:
-        logo_path = "logo_bs.png"  # uploaded file
+        logo_path = "/mnt/data/65e381cf-eddf-4447-a205-007564a9e8d3.png"
         with open(logo_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
         st.sidebar.markdown(
@@ -2259,50 +2239,56 @@ def main() -> None:
             unsafe_allow_html=True,
         )
     except Exception:
-        pass  # fail silently if the asset isn't present in a given environment
+        pass
 
-    # ---------- Sidebar navigation ----------
-    with st.sidebar:
-        page = option_menu(
-            None,
-            ["Fund Database", "Fund Monitor", "Performance Est", "Market Views", "Market Analytics"],
-            default_index=0,
-            orientation="vertical",
-            icons=[""] * 5,  # no icons
-            styles={
-                "container": {"padding": "0", "background": "transparent"},
-                "nav": {"padding": "0", "margin": "0"},
-                "nav-link": {"font-size": "16px", "text-align": "left"},
-                "nav-link-selected": {"color": "#1e6bff", "background": "transparent"},
-            },
-        )
+    # ---------- Sidebar: custom text menu (no arrows, no icons, no white card) ----------
+    PAGES = ["Fund Database", "Fund Monitor", "Performance Est", "Market Views", "Market Analytics"]
+    if "page" not in st.session_state:
+        st.session_state["page"] = PAGES[0]
 
-    # ---------- Page router (unchanged) ----------
+    for name in PAGES:
+        if name == st.session_state["page"]:
+            st.sidebar.markdown(f'<div class="nav-item-selected">{name}</div>', unsafe_allow_html=True)
+        else:
+            if st.sidebar.button(name, key=f"nav_{name}"):
+                st.session_state["page"] = name
+
+    page = st.session_state["page"]
+
+    # ---------- Right-hand content: default Streamlit theme (red accents) ----------
+    # No global color overrides here. All previous blue overrides are removed.
+
+    # ---------- Router (unchanged content) ----------
     if page == "Fund Database":
         st.header("Fund Database")
         show_fund_database()
+
     elif page == "Performance Est":
         st.header("Performance Estimates")
         st.write("Performance estimates are sent by hedge funds to investment.coverage@brightside-capital.com.")
         st.write("Automation and data extraction from emails happens via n8n and ChatGPT API.")
         st.write("Data stored in a cloud drive and pulled in below.")
         show_performance_view()
+
     elif page == "Market Views":
         st.write("## Fund Positions and Investment Thesis")
         st.write("Latest manager portfolio positions are extracted from fund letters, factsheets using LLMs and investment thesis performance are tracked.")
         st.write("Automatic PDF extraction when files are received via n8n workflowand ChatGPT API.")
         st.write("Data stored in a cloud drive and pulled in/transformed below.")
         show_market_view()
+
     elif page == "Fund Monitor":
         st.header("Fund Monitor")
         st.write("Fund data received via email attachments (pdf) are stored in a cloud drive.")
         st.write("Exposures, historical returns and other metrics are extracted using the ChatGPT API inside the n8n workflow.")
         st.write("Data stored in a cloud drive and pulled in/transformed below.")
         show_fund_monitor()
+
     elif page == "Market Analytics":
         st.header("Market Analytics")
         st.write("The idea here is to build a collection of market signals and indicators that provide the AI model with current market context i.e. what is going on? in order to connext the dots.")
         show_market_analytics()
+
 
 if __name__ == "__main__":
     main()
