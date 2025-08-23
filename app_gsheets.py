@@ -207,8 +207,11 @@ def build_exposure_df(row: pd.Series, prefixes: List[str]) -> pd.DataFrame:
 
 # === New page: Fund Database ===  # :contentReference[oaicite:0]{index=0}
 def show_fund_database() -> None:
-    st.header("Fund Database")
+    import pandas as pd
+    import streamlit as st
+    from st_aggrid import AgGrid, GridOptionsBuilder
 
+    st.header("Fund Database")
     tabs = st.tabs(["Overview", "Dilligence", "Liquidity Terms"])
 
     # --- Tab 1: Overview ---
@@ -219,7 +222,7 @@ def show_fund_database() -> None:
         sheet_id = st.secrets["fund_database"]["sheet_id"]
         worksheet = st.secrets["fund_database"].get("worksheet", "fund database")
 
-        # Load full sheet  :contentReference[oaicite:1]{index=1}
+        # Load full sheet via existing helper
         df = load_sheet(sheet_id, worksheet)
         if df.empty:
             st.warning("No rows found in the 'fund database' sheet.")
@@ -245,8 +248,8 @@ def show_fund_database() -> None:
         if sel_asset and "Asset Class" in filtered.columns:
             filtered = filtered[filtered["Asset Class"].isin(sel_asset)]
 
-        # Visible columns only
-        visible_cols = [
+        # Visible + editable scope
+        _ALLOWED_COLS = [
             "Fund Name",
             "Manager",
             "Asset Class",
@@ -256,17 +259,19 @@ def show_fund_database() -> None:
             "Inception",
             "AUM (in USD Millions)",
         ]
-        show_cols = [c for c in visible_cols if c in filtered.columns]
+        show_cols = [c for c in _ALLOWED_COLS if c in filtered.columns]
         display_df = filtered[show_cols].copy() if show_cols else filtered.copy()
+        display_df = display_df.reindex(columns=show_cols)
 
         # Top-right save button
         top_l, top_r = st.columns([1, 0.18])
         with top_r:
             do_save = st.button("save changes", type="primary", use_container_width=True)
 
-        # Editable grid
-        gb = GridOptionsBuilder.from_dataframe(display_df if not display_df.empty else pd.DataFrame(columns=[""]))
+        # Editable grid (lock Fund Name)
+        gb = GridOptionsBuilder.from_dataframe(display_df if not display_df.empty else pd.DataFrame(columns=_ALLOWED_COLS))
         gb.configure_default_column(editable=True, resizable=True, filter=True)
+        gb.configure_column("Fund Name", editable=False)
         gb.configure_grid_options(rowSelection="single")
         grid = AgGrid(
             display_df,
@@ -280,24 +285,81 @@ def show_fund_database() -> None:
         )
         edited_df = pd.DataFrame(grid["data"])
 
-        # Persist: overwrite worksheet with the edited view
+        # Patch only changed cells (non-destructive)
         if do_save:
+            def _normalize(cell):
+                if cell is None:
+                    return ""
+                return str(cell).strip()
+
+            def _build_key(row_dict: dict) -> str:
+                return f"{_normalize(row_dict.get('Fund Name'))}||{_normalize(row_dict.get('Manager'))}"
+
+            def _diff_and_update_sheet(edited_df_: pd.DataFrame, sheet_id_: str, worksheet_name_: str) -> tuple[int, int]:
+                from gspread.models import Cell
+
+                client = get_gspread_client()
+                sh = client.open_by_key(sheet_id_)
+                ws = sh.worksheet(worksheet_name_)
+
+                values = ws.get_all_values()
+                if not values:
+                    raise RuntimeError("Target worksheet is empty; cannot map columns/rows.")
+
+                header = values[0]
+                col_idx = {name: (header.index(name) + 1) for name in header if name}
+                missing = [c for c in _ALLOWED_COLS if c not in col_idx]
+                if missing:
+                    raise RuntimeError(f"Missing columns in sheet: {missing}")
+
+                # Build row map in sheet
+                key_to_rownum = {}
+                for i, row_vals in enumerate(values[1:], start=2):
+                    row_dict = {h: (row_vals[j] if j < len(row_vals) else "") for j, h in enumerate(header)}
+                    key = _build_key(row_dict)
+                    if key:
+                        key_to_rownum[key] = i
+
+                keep_cols = [c for c in _ALLOWED_COLS if c in edited_df_.columns]
+                edited_view = edited_df_[keep_cols].copy()
+                edited_view["_key"] = edited_view.apply(lambda s: _build_key(s.to_dict()), axis=1)
+
+                cells = []
+                rows_touched = set()
+
+                for _, row in edited_view.iterrows():
+                    key = row["_key"]
+                    if not key or key not in key_to_rownum:
+                        continue  # skip rows we cannot safely match
+                    rnum = key_to_rownum[key]
+                    rows_touched.add(rnum)
+                    raw = values[rnum - 1] if rnum - 1 < len(values) else []
+                    sheet_row_dict = {h: (raw[i] if i < len(raw) else "") for i, h in enumerate(header)}
+
+                    for col in keep_cols:
+                        new_val = _normalize(row.get(col))
+                        old_val = _normalize(sheet_row_dict.get(col))
+                        if new_val != old_val:
+                            cells.append(Cell(row=rnum, col=col_idx[col], value=new_val))
+
+                if cells:
+                    ws.update_cells(cells, value_input_option="USER_ENTERED")
+                return (len(cells), len(rows_touched))
+
             try:
-                client = get_gspread_client()  # :contentReference[oaicite:2]{index=2}
-                sh = client.open_by_key(sheet_id)
-                ws = sh.worksheet(worksheet)
-                values = [edited_df.columns.tolist()] + edited_df.fillna("").astype(str).values.tolist()
-                ws.clear()
-                ws.update("A1", values, value_input_option="USER_ENTERED")
-                st.success("Saved.")
+                changed, touched = _diff_and_update_sheet(edited_df, sheet_id, worksheet)
+                st.success(f"Patched {changed} cells across {touched} rows.")
             except Exception as exc:
                 st.error(f"Failed to save to Google Sheet: {exc}")
 
+    # --- Tab 2: Dilligence ---
     with tabs[1]:
         st.info("Add content here.")
 
+    # --- Tab 3: Liquidity Terms ---
     with tabs[2]:
         st.info("Add content here.")
+
 
 
 # ---- Existing product pages (kept as-is) ----
