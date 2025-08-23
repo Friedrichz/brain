@@ -204,13 +204,6 @@ def build_exposure_df(row: pd.Series, prefixes: List[str]) -> pd.DataFrame:
         parts.append(df)
     return pd.concat(parts, axis=1)
 
-st.caption("Service account email used for Sheets:")
-try:
-    client = get_gspread_client()  # :contentReference[oaicite:3]{index=3}
-    st.code(getattr(client.auth, "service_account_email", "unknown"))
-except Exception:
-    st.code("unavailable")
-
 
 # === New page: Fund Database ===  # :contentReference[oaicite:0]{index=0}
 def show_fund_database() -> None:
