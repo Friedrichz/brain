@@ -1438,24 +1438,24 @@ def show_fund_monitor() -> None:
         # ===== Narrative sections (expanders, expanded by default) =====
         n1c1, n1c2 = st.columns(2)
         with n1c1:
-                with st.expander("Market Opportunity", expanded=True):
-                    val = _fm_get_val(profile_row, "Market Opportunity")
-                    bullets = _split_bullets(val)
-                    if bullets:
-                        for b in bullets:
-                            st.markdown(f"- {b}")
-                    else:
-                        st.markdown(_fm_md_text(val), unsafe_allow_html=True)
+            with st.expander("Market Opportunity", expanded=True):
+                val = _fm_get_val(profile_row, "Market Opportunity")
+                bullets = _split_bullets(val)
+                if bullets:
+                    for b in bullets:
+                        st.markdown(f"- {b}")
+                else:
+                    st.markdown(_fm_md_text(val), unsafe_allow_html=True)
 
-            with n1c2:
-                with st.expander("Risks", expanded=True):
-                    val = _fm_get_val(profile_row, "Risks")
-                    bullets = _split_bullets(val)
-                    if bullets:
-                        for b in bullets:
-                            st.markdown(f"- {b}")
-                    else:
-                        st.markdown(_fm_md_text(val), unsafe_allow_html=True)
+        with n1c2:
+            with st.expander("Risks", expanded=True):
+                val = _fm_get_val(profile_row, "Risks")
+                bullets = _split_bullets(val)
+                if bullets:
+                    for b in bullets:
+                        st.markdown(f"- {b}")
+                else:
+                    st.markdown(_fm_md_text(val), unsafe_allow_html=True)
             
         n2c1, n2c2, n2c3 = st.columns(3)
         with n2c1:
