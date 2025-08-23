@@ -1142,14 +1142,22 @@ def _format_exposure_table(df: pd.DataFrame) -> Styler:
         styler = styler.set_properties(subset=pd.IndexSlice[:, [net_cols[-1]]], **{"font-weight": "bold"})
     return styler
 
+
+# ======== show_fund_monitor()  ========
+
 def show_fund_monitor() -> None:
-    # Preserved with track_record and net/gross charts:contentReference[oaicite:5]{index=5}
+    import pandas as pd
+    import numpy as np
+    import streamlit as st
+    import altair as alt
+
+    # ========= Data loads =========
     if not ("exposures" in st.secrets and "sheet_id" in st.secrets["exposures"]):
         st.error("Missing 'exposures' configuration in secrets.")
         return
-    sheet_id = st.secrets["exposures"].get("sheet_id")
-    worksheet = st.secrets["exposures"].get("worksheet", "Sheet1")
-    df = load_sheet(sheet_id, worksheet)
+    exp_sheet_id = st.secrets["exposures"]["sheet_id"]
+    exp_ws = st.secrets["exposures"].get("worksheet", "Sheet1")
+    df = load_sheet(exp_sheet_id, exp_ws)
     if df.empty:
         st.warning("No data returned from the exposures sheet.")
         return
@@ -1157,265 +1165,309 @@ def show_fund_monitor() -> None:
     if not ("securities_master" in st.secrets and "sheet_id" in st.secrets["securities_master"]):
         st.error("Missing 'securities_master' configuration in secrets.")
         return
-    sec_sheet_id = st.secrets["securities_master"].get("sheet_id")
-    sec_worksheet = st.secrets["securities_master"].get("worksheet", "Sheet1")
-    sec_df = load_sheet(sec_sheet_id, sec_worksheet)
-    if sec_df.empty or "canonical_id" not in sec_df.columns or "canonical_name" not in sec_df.columns:
-        st.warning("No data or missing columns in securities_master.")
+    sec_sheet_id = st.secrets["securities_master"]["sheet_id"]
+    sec_ws = st.secrets["securities_master"].get("worksheet", "Sheet1")
+    sec_df = load_sheet(sec_sheet_id, sec_ws)
+    if sec_df.empty or not {"canonical_id", "canonical_name"} <= set(sec_df.columns):
+        st.error("Missing columns in securities_master.")
         return
 
-    exposure_fund_ids = set(df["fund_id"].dropna().unique()) if "fund_id" in df.columns else set()
-    canonical_funds = sec_df[sec_df["canonical_id"].isin(exposure_fund_ids)][["canonical_id","canonical_name"]].drop_duplicates().sort_values("canonical_name")
+    # ========= Fund select =========
+    exposure_fund_ids = set(df["fund_id"].dropna().astype(str).unique()) if "fund_id" in df.columns else set()
+    canonical_funds = (
+        sec_df[sec_df["canonical_id"].astype(str).isin(exposure_fund_ids)][["canonical_id", "canonical_name"]]
+        .drop_duplicates()
+        .sort_values("canonical_name")
+    )
+    if canonical_funds.empty:
+        st.warning("No matching funds between exposures and securities_master.")
+        return
+
+    default_fund = st.secrets.get("defaults", {}).get("fund", None)
     fund_options = canonical_funds["canonical_name"].tolist()
-    default_fund = None
-    if "defaults" in st.secrets and "fund" in st.secrets["defaults"]:
-        default_fund = st.secrets["defaults"]["fund"]
     fund_index = fund_options.index(default_fund) if default_fund in fund_options else 0
 
-    sel_col1, sel_col2 = st.columns(2)
-    with sel_col1:
-        fund_choice = st.selectbox("Select Fund", fund_options, index=fund_index, key="fund_select")
-    selected_canonical_id = canonical_funds[canonical_funds["canonical_name"] == fund_choice]["canonical_id"].iloc[0]
+    csel1, csel2 = st.columns([2, 1])
+    with csel1:
+        fund_choice = st.selectbox("Select Fund", fund_options, index=fund_index, key="fm_fund_select")
+    selected_canonical_id = canonical_funds.loc[
+        canonical_funds["canonical_name"] == fund_choice, "canonical_id"
+    ].iloc[0]
 
+    # Normalize dates now; pre-slice to this fund
     if "date" in df.columns:
         df["date"] = df["date"].apply(parse_any_date)
-
-    if "fund_id" in df.columns:
-        fund_df = df[df["fund_id"] == selected_canonical_id]
-    else:
-        st.error("No fund_id column in exposures sheet.")
-        return
-
+    fund_df = df[df["fund_id"] == selected_canonical_id].copy()
     if fund_df.empty:
         st.warning("No records found for the selected fund.")
         return
-    date_values = sorted(fund_df["date"].dropna().unique().tolist(), reverse=True)
 
-    with sel_col2:
-        date_choice = st.selectbox("Select Date", date_values, key="date_select")
-        file_type = st.selectbox("Select file type", ["pdf","img"], index=0, key="filetype_select")
+    # ========= Tabs =========
+    tabs = st.tabs(["Overview", "Exposures", "Quant"])
 
-    filtered_row = fund_df[(fund_df["date"] == date_choice)]
-    if "file_type" in filtered_row.columns:
-        filtered_row = filtered_row[filtered_row["file_type"] == file_type]
-    if filtered_row.empty:
-        st.warning("No records found for the selected date and file type.")
-        return
-    row = filtered_row.iloc[0]
-
-    metrics_cols = st.columns(5)
-    metrics_cols[0].metric("AUM", row.get("aum_fund") or row.get("aum_firm"))
-    metrics_cols[1].metric("Net", row.get("net"))
-    metrics_cols[2].metric("Gross", row.get("gross"))
-    metrics_cols[3].metric("Long", row.get("long"))
-    metrics_cols[4].metric("Short", row.get("short"))
-
-    st.subheader("Last Summary & Positions")
-    sum_cols = st.columns([3, 1])
-
-    with sum_cols[0]:
-        bullets, repdate = [], None
+    # --------------------------------
+    # Tab 1: Overview
+    # --------------------------------
+    with tabs[0]:
+        # ---- Profile from Fund Database ----
+        profile_row = None
         try:
-            letters = _load_letters()
-            if not letters.empty and {"fund_id", "report_date", "letter_summary_5_bullets"} <= set(letters.columns):
+            if "fund_database" in st.secrets and "sheet_id" in st.secrets["fund_database"]:
+                db_id = st.secrets["fund_database"]["sheet_id"]
+                db_ws = st.secrets["fund_database"].get("worksheet", "fund database")
+                db = load_sheet(db_id, db_ws)
+                if not db.empty and "Fund Name" in db.columns:
+                    # exact match first, then casefold fallback
+                    m = db["Fund Name"] == fund_choice
+                    if not m.any():
+                        m = db["Fund Name"].astype(str).str.casefold() == str(fund_choice).casefold()
+                    if m.any():
+                        profile_row = db[m].iloc[0]
+        except Exception:
+            profile_row = None
+
+        def _val(col, fallback=""):
+            if profile_row is None:
+                return fallback
+            return "" if pd.isna(profile_row.get(col)) else str(profile_row.get(col))
+
+        def _metric_cell(label, value):
+            st.caption(label)
+            st.markdown(f"<div style='font-size:20px;font-weight:600'>{value if value != '' else '-'}</div>", unsafe_allow_html=True)
+
+        r1c1, r1c2, r1c3, r1c4 = st.columns([1, 1, 1, 2])
+        with r1c1: _metric_cell("Fund Name", _val("Fund Name", fund_choice))
+        with r1c2: _metric_cell("Asset Class", _val("Asset Class"))
+        with r1c3: _metric_cell("Type", _val("Type"))
+        with r1c4: _metric_cell("Summary", _val("Summary"))
+
+        r2c1, r2c2, r2c3, r2c4, r2c5 = st.columns(5)
+        with r2c1: _metric_cell("Size", _val("AUM (in USD Millions)"))
+        with r2c2: _metric_cell("Time Horizon", _val("Time Horizon"))
+        with r2c3: _metric_cell("Style", _val("Style"))
+        with r2c4: _metric_cell("Geo", _val("Geo"))
+        with r2c5: _metric_cell("Sector", _val("Sector"))
+
+        r3 = st.columns(6)
+        with r3[0]: _metric_cell("Avg # Positions", _val("Avg # Positions"))
+        with r3[1]: _metric_cell("Avg Gross", _val("Avg Gross"))
+        with r3[2]: _metric_cell("Avg Net", _val("Avg Net"))
+        with r3[3]: _metric_cell("Management Fee", _val("Management Fee"))
+        with r3[4]: _metric_cell("Performance Fee", _val("Performance Fee"))
+        with r3[5]: _metric_cell("Inception", _val("Inception"))
+
+        expander_cols = st.columns(3)
+        with expander_cols[0]:
+            with st.expander("Market Opportunity", expanded=False):
+                st.write(_val("Market Opportunity"))
+            with st.expander("Risks", expanded=False):
+                st.write(_val("Risks"))
+        with expander_cols[1]:
+            with st.expander("Team Background", expanded=False):
+                st.write(_val("Team Background"))
+            with st.expander("Edge / What they do", expanded=False):
+                st.write(_val("Edge / What they do"))
+        with expander_cols[2]:
+            with st.expander("Portfolio", expanded=False):
+                st.write(_val("Portfolio"))
+
+        st.markdown("---")
+
+        # ---- Cumulative Return + AUM history (moved here) ----
+        hc1, hc2 = st.columns(2, vertical_alignment="top")
+
+        with hc1:
+            st.subheader("Cumulative Performance")
+            track_record = fetch_track_record_json(selected_canonical_id)
+            if track_record and isinstance(track_record.get("returns"), list):
+                returns_df = pd.DataFrame(track_record["returns"])
+                # normalize columns
+                if "date" not in returns_df.columns or "return" not in returns_df.columns:
+                    if {"date", "ret"} <= set(returns_df.columns):
+                        returns_df = returns_df.rename(columns={"ret": "return"})
+                    elif {"date", "value"} <= set(returns_df.columns):
+                        returns_df = returns_df.rename(columns={"value": "return"})
+                if {"date", "return"} <= set(returns_df.columns):
+                    returns_df["date"] = returns_df["date"].apply(parse_any_date)
+                    returns_df["return"] = pd.to_numeric(returns_df["return"], errors="coerce")
+                    returns_df = returns_df.dropna(subset=["date", "return"]).sort_values("date")
+                    if not returns_df.empty:
+                        returns_df["cum"] = (1.0 + returns_df["return"]).cumprod() - 1.0
+                        ch = (
+                            alt.Chart(returns_df)
+                            .mark_line(point=True)
+                            .encode(
+                                x=alt.X("date:T", title="Date"),
+                                y=alt.Y("cum:Q", title="Cumulative Return", axis=alt.Axis(format="~%")),
+                                tooltip=[alt.Tooltip("date:T"), alt.Tooltip("cum:Q", title="Cumulative", format=".2%")],
+                            )
+                            .properties(height=350)
+                        )
+                        st.altair_chart(ch, use_container_width=True)
+                    else:
+                        st.info("No return series available.")
+                else:
+                    st.info("No return series available.")
+            else:
+                st.info("No return series available.")
+
+        with hc2:
+            st.subheader("Historical AUM")
+            aum_hist = fund_df.copy()
+            aum_hist["date"] = pd.to_datetime(aum_hist["date"], errors="coerce")
+            aum_hist["aum_fund_num"] = aum_hist.get("aum_fund", np.nan).apply(aum_to_float) if "aum_fund" in aum_hist.columns else np.nan
+            aum_hist = (
+                aum_hist.dropna(subset=["date", "aum_fund_num"])
+                .sort_values("date")
+                .drop_duplicates(subset=["date"], keep="last")
+                .rename(columns={"aum_fund_num": "AUM"})
+            )
+            if aum_hist.empty:
+                st.info("No AUM history available.")
+            else:
+                ch = (
+                    alt.Chart(aum_hist)
+                    .mark_line(point=True)
+                    .encode(
+                        x=alt.X("date:T", title="Date"),
+                        y=alt.Y("AUM:Q", title="AUM", axis=alt.Axis(format=",.0f")),
+                        tooltip=[alt.Tooltip("date:T", title="Date"), alt.Tooltip("AUM:Q", title="AUM", format=",.0f")],
+                    )
+                    .properties(height=350)
+                )
+                st.altair_chart(ch, use_container_width=True)
+
+    # --------------------------------
+    # Tab 2: Exposures  (everything except the two historical charts)
+    # --------------------------------
+    with tabs[1]:
+        date_values = sorted(fund_df["date"].dropna().unique().tolist(), reverse=True)
+        if not date_values:
+            st.warning("No dates available for this fund.")
+            return
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            date_choice = st.selectbox("Select Date", date_values, key="fm_date_select")
+        with c2:
+            file_types = fund_df["file_type"].dropna().unique().tolist() if "file_type" in fund_df.columns else []
+            if file_types:
+                file_type = st.selectbox("Select file type", file_types, key="fm_filetype_select")
+                filtered_row = fund_df[(fund_df["date"] == date_choice) & (fund_df["file_type"] == file_type)]
+            else:
+                filtered_row = fund_df[(fund_df["date"] == date_choice)]
+        if filtered_row.empty:
+            st.warning("No records found for the selected date and file type.")
+            return
+        row = filtered_row.iloc[0]
+
+        # headline metrics
+        mcols = st.columns(5)
+        mcols[0].metric("AUM", row.get("aum_fund") or row.get("aum_firm"))
+        mcols[1].metric("Net", row.get("net"))
+        mcols[2].metric("Gross", row.get("gross"))
+        mcols[3].metric("Long", row.get("long"))
+        mcols[4].metric("Short", row.get("short"))
+
+        # last summary + positions
+        st.subheader("Last Summary & Positions")
+        sc1, sc2 = st.columns([3, 1])
+        with sc1:
+            bullets, repdate = [], None
+            try:
+                letters = _load_letters()
+            except Exception:
+                letters = pd.DataFrame()
+            if (
+                not letters.empty
+                and {"fund_id", "report_date", "letter_summary_5_bullets"} <= set(letters.columns)
+            ):
                 fl = letters[letters["fund_id"] == selected_canonical_id].copy()
                 fl["report_date"] = pd.to_datetime(fl["report_date"], errors="coerce")
                 if fl["report_date"].notna().any():
-                    latest_rd = fl["report_date"].max()
-                    latest_rows = fl[fl["report_date"] == latest_rd]
-                    latest_rows = latest_rows[latest_rows["letter_summary_5_bullets"].astype(str).str.strip().ne("")]
-                    if not latest_rows.empty:
-                        cell = latest_rows.iloc[0]["letter_summary_5_bullets"]
-                        bullets = _split_bullets(cell)
-                        repdate = pd.to_datetime(latest_rd, errors="coerce")
-        except Exception:
-            bullets, repdate = [], None
+                    repdate = fl["report_date"].max()
+                    bullets = _split_bullets(fl.loc[fl["report_date"] == repdate, "letter_summary_5_bullets"].iloc[0])
+            if bullets:
+                st.markdown(f"**Latest report:** {repdate.date() if repdate is not None else ''}")
+                for b in bullets:
+                    st.markdown(f"- {b}")
+            else:
+                st.info("No recent summary available.")
 
-        if repdate is not None:
-            st.markdown(f"**Letter as of: {repdate.strftime('%Y-%m-%d')}**")
-        else:
-            st.markdown("**Letter as of:** _N/A_")
-
-        if bullets:
-            st.markdown("\n".join(f"- {b}" for b in bullets))
-        else:
-            st.markdown("_No summary available for the latest letter._")
-
-    with sum_cols[1]:
-        st.metric("Long positions", row.get("num_pos_long"))
-        st.metric("Short positions", row.get("num_pos_short"))
-
-    sector_keys = ["sector_long","sector_short","sector_gross","sector_net"]
-    geo_keys = ["geo_long","geo_short","geo_gross","geo_net"]
-    st.subheader("Exposures")
-    exp_cols = st.columns(2)
-
-    if all(k in row.index for k in sector_keys):
-        with exp_cols[0]:
-            st.markdown("**Sector Exposures**")
-            sector_df = build_exposure_df(row, sector_keys)
-            st.dataframe(_format_exposure_table(sector_df), use_container_width=True)
-
-    if all(k in row.index for k in geo_keys):
-        with exp_cols[1]:
-            st.markdown("**Geographical Exposures**")
-            geo_df = build_exposure_df(row, geo_keys)
-            st.dataframe(_format_exposure_table(geo_df), use_container_width=True)
-
-    st.subheader("Historical Analysis")
-    h1, h2 = st.columns(2, vertical_alignment="top")
-    with h1:
-        st.write("Cumulative Performance")
-        track_record = fetch_track_record_json(selected_canonical_id)
-        if track_record and isinstance(track_record.get("returns"), list):
-            returns_df = pd.DataFrame(track_record["returns"])
-            if "date" not in returns_df.columns or "return" not in returns_df.columns:
-                if "ret" in returns_df.columns and "date" in returns_df.columns:
-                    returns_df = returns_df.rename(columns={"ret":"return"})
-                elif "value" in returns_df.columns and "date" in returns_df.columns:
-                    returns_df = returns_df.rename(columns={"value":"return"})
-            if {"date","return"} <= set(returns_df.columns):
-                returns_df["date"] = returns_df["date"].apply(parse_any_date)
-                returns_df = returns_df.dropna(subset=["date","return"])
-                returns_df["return"] = pd.to_numeric(returns_df["return"], errors="coerce")
-                returns_df = returns_df.dropna(subset=["return"]).sort_values("date")
-
-                import altair as alt
-                returns_df["ret_dec"] = returns_df["return"] / 100.0
-                returns_df["cum_return"] = (1.0 + returns_df["ret_dec"]).cumprod() - 1.0
-                cum_chart = alt.Chart(returns_df).mark_line(point=True).encode(
-                    x=alt.X("date:T", title="Date"),
-                    y=alt.Y("cum_return:Q", title="Cumulative Return", axis=alt.Axis(format="%")),
-                    tooltip=[alt.Tooltip("date:T", title="Date"),
-                            alt.Tooltip("return:Q", title="Monthly Return", format=".2f"),
-                            alt.Tooltip("cum_return:Q", title="Cumulative", format=".2%")]
-                ).properties(width=700, height=350)
-                st.altair_chart(cum_chart, use_container_width=True)
-    
-    with h2:
-        st.write("Net & Gross Exposure")
-        hist_df = fund_df.copy().drop_duplicates(subset=["date"])
-        if "net" in hist_df.columns and "gross" in hist_df.columns:
-            hist_df = hist_df.dropna(subset=["date","net","gross"])
-            if "net" in hist_df.columns:
-                hist_df["net"] = hist_df["net"].apply(percent_to_float)
-            if "gross" in hist_df.columns:
-                hist_df["gross"] = hist_df["gross"].apply(percent_to_float)
-            hist_df = hist_df.dropna(subset=["date","net","gross"]).sort_values("date")
-            if not hist_df.empty:
-                import altair as alt
-                chart = alt.Chart(hist_df).transform_fold(
-                    ["net","gross"],
-                    as_=["Exposure","Value"]
-                ).mark_line(point=True).encode(
-                    x=alt.X("date:T", title="Date"),
-                    y=alt.Y("Value:Q", title="Exposure"),
-                    color=alt.Color("Exposure:N", title="Type"),
-                    tooltip=["date", alt.Tooltip("Exposure:N"), alt.Tooltip("Value:Q")]
-                ).properties(width=700, height=350)
-                st.altair_chart(chart, use_container_width=True)
-    
-    c1, c2 = st.columns(2, vertical_alignment="top")
-    with c1:
-        st.subheader("Fund Positions")
-        try:
-            letters = _load_letters()
-        except Exception:
-            letters = pd.DataFrame()
-
-        if (
-            letters.empty
-            or not {"fund_id", "report_date", "position_ticker", "position_weight_percent"} <= set(letters.columns)
-        ):
-            st.info("No positions available.")
-        else:
-            df = letters[letters["fund_id"] == selected_canonical_id].copy()
-            # keep rows with valid tickers and weights
-            mask = _nonnull_mask(df["position_ticker"]) & _nonnull_mask(df["position_weight_percent"])
-            df = df[mask].copy()
-            df["report_date"] = pd.to_datetime(df["report_date"], errors="coerce")
-
-            if df.empty or df["report_date"].dropna().empty:
+        with sc2:
+            st.markdown("**Top 10 Positions**")
+            try:
+                letters = _load_letters()
+            except Exception:
+                letters = pd.DataFrame()
+            if letters.empty or not {"fund_id", "report_date", "position_ticker", "position_weight_percent"} <= set(letters.columns):
                 st.info("No positions available.")
             else:
-                latest_rd = df["report_date"].max()
-                df = df[df["report_date"] == latest_rd].copy()
+                dfp = letters[letters["fund_id"] == selected_canonical_id].copy()
+                dfp["report_date"] = pd.to_datetime(dfp["report_date"], errors="coerce")
+                if dfp.empty or dfp["report_date"].dropna().empty:
+                    st.info("No positions available.")
+                else:
+                    latest_rd = dfp["report_date"].max()
+                    dfp = dfp[dfp["report_date"] == latest_rd].copy()
+                    for c in ["position_name", "position_sector"]:
+                        if c not in dfp.columns:
+                            dfp[c] = None
+                    view = dfp[["position_name", "position_ticker", "position_sector", "position_weight_percent"]].rename(
+                        columns={
+                            "position_name": "Position Name",
+                            "position_ticker": "Position Ticker",
+                            "position_sector": "Position Sector",
+                            "position_weight_percent": "Position Weight (%)",
+                        }
+                    ).copy()
+                    view = view.dropna(subset=["Position Ticker", "Position Weight (%)"])
+                    view["Position Weight (%)"] = pd.to_numeric(view["Position Weight (%)"], errors="coerce")
+                    view = view.sort_values("Position Weight (%)", ascending=False).head(10)
+                    st.dataframe(view, use_container_width=True)
 
-                # ensure optional columns exist
-                for c in ["position_name", "position_sector"]:
-                    if c not in df.columns:
-                        df[c] = None
+        # exposures tables
+        st.subheader("Exposures")
+        sector_keys = ["sector_long", "sector_short", "sector_gross", "sector_net"]
+        geo_keys = ["geo_long", "geo_short", "geo_gross", "geo_net"]
+        ec1, ec2 = st.columns(2)
+        if all(k in row.index for k in sector_keys):
+            with ec1:
+                st.markdown("**Sector Exposures**")
+                sector_df = build_exposure_df(row, sector_keys)
+                st.dataframe(_format_exposure_table(sector_df), use_container_width=True)
+        if all(k in row.index for k in geo_keys):
+            with ec2:
+                st.markdown("**Geographical Exposures**")
+                geo_df = build_exposure_df(row, geo_keys)
+                st.dataframe(_format_exposure_table(geo_df), use_container_width=True)
 
-                view = df[[
-                    "position_name", "position_ticker", "position_sector",
-                    "position_weight_percent", "report_date"
-                ]].rename(columns={
-                    "position_name": "Position Name",
-                    "position_ticker": "Position Ticker",
-                    "position_sector": "Position Sector",
-                    "position_weight_percent": "Position Weight (%)",
-                    "report_date": "Report Date",
-                })
-
-                # attach MTD/YTD performance using existing helper (MTD/YTD only version)
-                metrics = view.rename(columns={"Position Ticker": "position_ticker"}).copy()
-                metrics = _attach_return_columns(metrics, ticker_col="position_ticker")
-                metrics = metrics.rename(columns={"position_ticker": "Position Ticker"})
-
-                # order by weight desc
-                metrics = metrics.sort_values("Position Weight (%)", ascending=False)
-
-                # final column order (no Fund Name)
-                metrics = metrics[[
-                    "Position Name","Position Sector",
-                    "Position Weight (%)", "MTD %", "YTD %"
-                ]]
-
-                st.dataframe(
-                    metrics,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Report Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD", step="day"),
-                        "Position Weight (%)": st.column_config.NumberColumn(format="%.2f%%"),
-                        "MTD %": st.column_config.NumberColumn(format="%.2f%%"),
-                        "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
-                    },
+        # net/gross time series (keep here if you already had it; omit AUM/returns which moved to Overview)
+        if {"date", "net", "gross"} <= set(fund_df.columns):
+            hist_df = fund_df[["date", "net", "gross"]].copy()
+            hist_df["date"] = pd.to_datetime(hist_df["date"], errors="coerce")
+            hist_df["net"] = hist_df["net"].apply(percent_to_float)
+            hist_df["gross"] = hist_df["gross"].apply(percent_to_float)
+            hist_df = hist_df.dropna(subset=["date", "net", "gross"]).sort_values("date")
+            if not hist_df.empty:
+                ch = (
+                    alt.Chart(hist_df)
+                    .transform_fold(["net", "gross"], as_=["Exposure", "Value"])
+                    .mark_line(point=True)
+                    .encode(
+                        x=alt.X("date:T", title="Date"),
+                        y=alt.Y("Value:Q", title="Exposure"),
+                        color=alt.Color("Exposure:N", title="Type"),
+                        tooltip=[alt.Tooltip("date:T"), alt.Tooltip("Exposure:N"), alt.Tooltip("Value:Q")],
+                    )
+                    .properties(height=350)
                 )
+                st.altair_chart(ch, use_container_width=True)
 
-    with c2:
-        st.subheader("Historical AUM")
-        aum_hist = fund_df.copy()
-
-        # normalize date and aum
-        aum_hist["date"] = pd.to_datetime(aum_hist["date"], errors="coerce")
-        aum_hist["aum_fund_num"] = aum_hist["aum_fund"].apply(aum_to_float)
-
-        aum_hist = (
-            aum_hist.dropna(subset=["date", "aum_fund_num"])
-                    .sort_values("date")
-                    .drop_duplicates(subset=["date"], keep="last")
-                    .rename(columns={"aum_fund_num": "AUM"})
-        )
-
-        if aum_hist.empty:
-            st.info("No AUM history available.")
-        else:
-            import altair as alt
-            ch = (
-                alt.Chart(aum_hist)
-                .mark_line(point=True)
-                .encode(
-                    x=alt.X("date:T", title="Date"),
-                    y=alt.Y("AUM:Q", title="AUM", axis=alt.Axis(format=",.0f")),
-                    tooltip=[
-                        alt.Tooltip("date:T", title="Date"),
-                        alt.Tooltip("AUM:Q", title="AUM", format=",.0f"),
-                    ],
-                )
-                .properties(height=350)
-            )
-            st.altair_chart(ch, use_container_width=True)
+    # --------------------------------
+    # Tab 3: Quant
+    # --------------------------------
+    with tabs[2]:
+        st.info("Quant analytics placeholder.")
 
 
 # =========================
