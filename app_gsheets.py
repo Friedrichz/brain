@@ -2181,41 +2181,86 @@ def show_market_analytics():
 
 # ---- Main ----
 
+# app_gsheets.py
+
+import streamlit as st
+from streamlit_option_menu import option_menu
+import base64
+
 def main() -> None:
     st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
+
+    # --- Inject custom CSS ---
+    st.markdown("""
+        <style>
+        /* Sidebar background */
+        [data-testid="stSidebar"] {
+            background-color: #1d2533; /* dark blue from screenshot */
+        }
+        /* Remove icons and borders in option menu */
+        ul.nav.nav-pills {
+            border: none !important;
+        }
+        ul.nav.nav-pills li a {
+            color: white !important;
+            border: none !important;
+        }
+        ul.nav.nav-pills li a:hover {
+            background-color: rgba(255,255,255,0.1) !important;
+            color: white !important;
+        }
+        ul.nav.nav-pills li a.active {
+            background-color: rgba(255,255,255,0.15) !important;
+            color: white !important;
+        }
+        /* Change clicked/active link color on content pages */
+        a, a:visited, a:active {
+            color: #0066ff !important;  /* blue instead of red */
+        }
+        .stTabs [role="tab"][aria-selected="true"] {
+            color: #0066ff !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # --- Add logo to sidebar ---
+    logo_path = "logo_bs.png"  # file uploaded
+    with open(logo_path, "rb") as f:
+        data = f.read()
+    b64 = base64.b64encode(data).decode("utf-8")
+    st.sidebar.markdown(
+        f"""
+        <div style="text-align:center;padding:10px 0;">
+            <img src="data:image/png;base64,{b64}" width="180">
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # --- Sidebar menu ---
     with st.sidebar:
         page = option_menu(
-            "Navigation",
-            ["Fund Database", "Performance Est", "Market Views", "Fund Monitor", "Market Analytics"],  # :contentReference[oaicite:1]{index=1}
+            None,  # remove title text
+            ["Fund Database", "Fund Monitor", "Performance Est", "Market Views", "Market Analytics"],
             default_index=0,
-            orientation="vertical"
+            orientation="vertical",
+            icons=[None]*5  # no icons
         )
-    if page == "Fund Database":  # :contentReference[oaicite:2]{index=2}
+
+    if page == "Fund Database":
         st.header("Fund Database")
         show_fund_database()
-    
     elif page == "Performance Est":
         st.header("Performance Estimates")
-        st.write("Performance estimates are sent by hedge funds to investment.coverage@brightside-capital.com.")
-        st.write("Automation and data extraction from emails happens via n8n and ChatGPT API.")
-        st.write("Data stored in a cloud drive and pulled in below.")
         show_performance_view()
-
     elif page == "Market Views":
-        st.write("## Fund Positions and Investment Thesis")
-        st.write("Latest manager portfolio positions are extracted from fund letters, factsheets using LLMs and investment thesis performance are tracked.")
-        st.write("Automatic PDF extraction when files are received via n8n workflowand ChatGPT API.")
-        st.write("Data stored in a cloud drive and pulled in/transformed below.")
+        st.header("Market Views")
         show_market_view()
     elif page == "Fund Monitor":
         st.header("Fund Monitor")
-        st.write("Fund data received via email attachments (pdf) are stored in a cloud drive.")
-        st.write("Exposures, historical returns and other metrics are extracted using the ChatGPT API inside the n8n workflow.")
-        st.write("Data stored in a cloud drive and pulled in/transformed below.")
         show_fund_monitor()
     elif page == "Market Analytics":
         st.header("Market Analytics")
-        st.write("The idea here is to build a collection of market signals and indicators that provide the AI model with current market context i.e. what is going on? in order to connext the dots.")
         show_market_analytics()
 
 if __name__ == "__main__":
