@@ -409,7 +409,8 @@ def show_fund_database() -> None:
 
     # --- Tab 3: Uploads (push to Google Drive) ---
     with tabs[2]:
-        st.subheader("Upload supporting documents")
+        st.subheader("Upload pdf presentations of funds")
+        st.write("Drop file into this folder: https://drive.google.com/drive/u/0/folders/1Jq2E37G-GEgVswAyeb8X_6ky1Y3FPgKs")
 
         uploaded = st.file_uploader("Choose a file")
         if uploaded is not None:
