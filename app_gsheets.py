@@ -211,7 +211,6 @@ def show_fund_database() -> None:
     import streamlit as st
     from st_aggrid import AgGrid, GridOptionsBuilder
 
-    st.header("Fund Database")
     tabs = st.tabs(["Overview", "Liquidity & Ops"])
 
     # --- Tab 1: Overview (editable, non-destructive save) ---
@@ -230,13 +229,13 @@ def show_fund_database() -> None:
         f1, f2, f3 = st.columns(3)
         with f1:
             macro_vals = sorted(df["Brightside Macro"].dropna().unique().tolist()) if "Brightside Macro" in df.columns else []
-            sel_macro = st.multiselect("Brightside Macro", macro_vals, default=[])
+            sel_macro = st.multiselect("Brightside Macro", macro_vals, default=[], key="fd_ov_macro")
         with f2:
             status_vals = sorted(df["Status"].dropna().unique().tolist()) if "Status" in df.columns else []
-            sel_status = st.multiselect("Status", status_vals, default=[])
+            sel_status = st.multiselect("Status", status_vals, default=[], key="fd_ov_status")
         with f3:
             asset_vals = sorted(df["Asset Class"].dropna().unique().tolist()) if "Asset Class" in df.columns else []
-            sel_asset = st.multiselect("Asset Class", asset_vals, default=[])
+            sel_asset = st.multiselect("Asset Class", asset_vals, default=[], key="fd_ov_asset")
 
         filtered = df.copy()
         if sel_macro and "Brightside Macro" in filtered.columns:
@@ -262,7 +261,7 @@ def show_fund_database() -> None:
 
         top_l, top_r = st.columns([1, 0.18])
         with top_r:
-            do_save = st.button("save changes", type="primary", use_container_width=True)
+            # do_save = st.button("save changes", type="primary", use_container_width=True, key="fd_ov_save")
 
         gb = GridOptionsBuilder.from_dataframe(display_df if not display_df.empty else pd.DataFrame(columns=_ALLOWED_COLS))
         gb.configure_default_column(editable=True, resizable=True, filter=True)
@@ -277,6 +276,7 @@ def show_fund_database() -> None:
             fit_columns_on_grid_load=True,
             update_mode="MODEL_CHANGED",
             reload_data=False,
+            key="fd_ov_grid",
         )
         edited_df = pd.DataFrame(grid["data"])
 
@@ -361,13 +361,13 @@ def show_fund_database() -> None:
         f1, f2, f3 = st.columns(3)
         with f1:
             macro_vals = sorted(df["Brightside Macro"].dropna().unique().tolist()) if "Brightside Macro" in df.columns else []
-            sel_macro = st.multiselect("Brightside Macro", macro_vals, default=[])
+            sel_macro = st.multiselect("Brightside Macro", macro_vals, default=[], key="fd_lo_macro")
         with f2:
             status_vals = sorted(df["Status"].dropna().unique().tolist()) if "Status" in df.columns else []
-            sel_status = st.multiselect("Status", status_vals, default=[])
+            sel_status = st.multiselect("Status", status_vals, default=[], key="fd_lo_status")
         with f3:
             asset_vals = sorted(df["Asset Class"].dropna().unique().tolist()) if "Asset Class" in df.columns else []
-            sel_asset = st.multiselect("Asset Class", asset_vals, default=[])
+            sel_asset = st.multiselect("Asset Class", asset_vals, default=[], key="fd_lo_asset")
 
         filtered = df.copy()
         if sel_macro and "Brightside Macro" in filtered.columns:
@@ -403,6 +403,7 @@ def show_fund_database() -> None:
             fit_columns_on_grid_load=True,
             update_mode="NO_UPDATE",
             reload_data=False,
+            key="fd_lo_grid",
         )
 
 
