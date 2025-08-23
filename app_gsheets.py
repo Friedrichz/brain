@@ -1186,28 +1186,59 @@ def _fm_arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 # ---------- helper: value coercers ----------
-def _fm_percent_to_float(x):
+# PATCH 1 — replace these helpers (fix AUM + returns parsing)
+def _fm_aum_to_float(x):
+    """Return AUM in USD millions. Handles 6'600, 6,600, 6.6bn, 6.6b, 6.6m, $1,234, etc."""
     if x is None or (isinstance(x, float) and np.isnan(x)):
         return np.nan
     s = str(x).strip()
-    if s.endswith("%"):
-        try:
-            return float(s[:-1]) / 100.0
-        except Exception:
-            return np.nan
-    try:
-        return float(s)
-    except Exception:
+    if s == "":
         return np.nan
+    s = (
+        s.replace(",", "")
+         .replace("$", "")
+         .replace("’", "")
+         .replace("'", "")
+         .replace(" ", "")
+         .lower()
+    )
+    mult = 1.0  # all outputs in millions
+    if s.endswith("bn") or s.endswith("b"):
+        mult = 1_000.0
+        s = s[:-2] if s.endswith("bn") else s[:-1]
+    elif s.endswith("m"):
+        mult = 1.0
+        s = s[:-1]
+    try:
+        return float(s) * mult
+    except Exception:
+        import re
+        m = re.findall(r"-?\d+(?:\.\d+)?", s)
+        return float(m[0]) * mult if m else np.nan
 
-def _fm_aum_to_float(x):
+def _fm_return_to_float(x):
+    """Robust monthly return parser. Accepts %, decimals, and percentage points."""
     if x is None or (isinstance(x, float) and np.isnan(x)):
         return np.nan
-    s = str(x).replace(",", "").replace("$", "").strip()
+    s = str(x).strip()
+    if s == "":
+        return np.nan
+    if s.endswith("%"):
+        try:
+            v = float(s[:-1]) / 100.0
+        except Exception:
+            return np.nan
+        return max(v, -0.99)
     try:
-        return float(s)
+        f = float(s)
     except Exception:
         return np.nan
+    # Heuristic: values with abs >= 2 and <= 100 look like percentage points -> scale
+    if -100.0 <= f <= 100.0 and abs(f) >= 2.0:
+        f = f / 100.0
+    # Guardrail against -100% (blows up cumprod)
+    return max(f, -0.99)
+
 
 # ---------- Sheet aliases (include exact narrative labels you confirmed) ----------
 # ===== PATCH 1: Update aliases (ensure this dict includes Manager Name) =====
@@ -1426,14 +1457,15 @@ def show_fund_monitor() -> None:
                 st.markdown(_fm_md_text(_fm_get_val(profile_row, "Portfolio")), unsafe_allow_html=True)
 
         st.markdown("---")
-
-        # ===== Charts (leave your existing code below this line) =====
         hc1, hc2 = st.columns(2)
+
+        # ---- Cumulative Performance (robust parsing) ----
         with hc1:
             st.subheader("Cumulative Performance")
             track_record = fetch_track_record_json(selected_canonical_id)
             if track_record and isinstance(track_record.get("returns"), list):
-                r = pd.DataFrame(track_record["returns"])
+                r = pd.DataFrame(track_record["returns"]).copy()
+                # normalize columns
                 if "date" not in r.columns or "return" not in r.columns:
                     if {"date", "ret"} <= set(r.columns):
                         r = r.rename(columns={"ret": "return"})
@@ -1441,10 +1473,10 @@ def show_fund_monitor() -> None:
                         r = r.rename(columns={"value": "return"})
                 if {"date", "return"} <= set(r.columns):
                     r["date"] = pd.to_datetime(r["date"], errors="coerce")
-                    r["return"] = pd.to_numeric(r["return"], errors="coerce")
+                    r["return"] = r["return"].apply(_fm_return_to_float)
                     r = r.dropna(subset=["date", "return"]).sort_values("date")
                     if not r.empty:
-                        r["cum"] = (1 + r["return"]).cumprod() - 1
+                        r["cum"] = (1.0 + r["return"]).cumprod() - 1.0
                         ch = (
                             alt.Chart(r)
                             .mark_line(point=True)
@@ -1456,34 +1488,44 @@ def show_fund_monitor() -> None:
                             .properties(height=350)
                         )
                         st.altair_chart(ch, use_container_width=True)
+                    else:
+                        st.info("No return series available.")
+                else:
+                    st.info("No return series available.")
             else:
                 st.info("No return series available.")
 
+        # ---- Historical AUM (handles '6’600' etc) ----
         with hc2:
             st.subheader("Historical AUM")
             h = fund_df.copy()
             h["date"] = pd.to_datetime(h["date"], errors="coerce")
-            h["aum_fund_num"] = h.get("aum_fund", np.nan).apply(_fm_aum_to_float) if "aum_fund" in h.columns else np.nan
-            h = (
-                h.dropna(subset=["date", "aum_fund_num"])
-                .sort_values("date")
-                .drop_duplicates(subset=["date"], keep="last")
-                .rename(columns={"aum_fund_num": "AUM"})
-            )
-            if not h.empty:
-                ch = (
-                    alt.Chart(h)
-                    .mark_line(point=True)
-                    .encode(
-                        x=alt.X("date:T", title="Date"),
-                        y=alt.Y("AUM:Q", title="AUM", axis=alt.Axis(format=",.0f")),
-                        tooltip=[alt.Tooltip("date:T", title="Date"), alt.Tooltip("AUM:Q", title="AUM", format=",.0f")],
-                    )
-                    .properties(height=350)
-                )
-                st.altair_chart(ch, use_container_width=True)
-            else:
+
+            # choose the first available AUM column
+            aum_col = next((c for c in ["aum_fund", "aum_firm", "aum"] if c in h.columns), None)
+            if aum_col is None:
                 st.info("No AUM history available.")
+            else:
+                h["AUM"] = h[aum_col].apply(_fm_aum_to_float)
+                h = (
+                    h.dropna(subset=["date", "AUM"])
+                    .sort_values("date")
+                    .drop_duplicates(subset=["date"], keep="last")
+                )
+                if not h.empty:
+                    ch = (
+                        alt.Chart(h)
+                        .mark_line(point=True)
+                        .encode(
+                            x=alt.X("date:T", title="Date"),
+                            y=alt.Y("AUM:Q", title="AUM (USD mm)", axis=alt.Axis(format=",.0f")),
+                            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("AUM:Q", title="AUM (USD mm)", format=",.0f")],
+                        )
+                        .properties(height=350)
+                    )
+                    st.altair_chart(ch, use_container_width=True)
+                else:
+                    st.info("No AUM history available.")
     # ==================== END OVERVIEW TAB ====================
 
 
