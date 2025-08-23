@@ -212,9 +212,9 @@ def show_fund_database() -> None:
     from st_aggrid import AgGrid, GridOptionsBuilder
 
     st.header("Fund Database")
-    tabs = st.tabs(["Overview", "Dilligence", "Liquidity Terms"])
+    tabs = st.tabs(["Overview", "Liquidity & Ops"])
 
-    # --- Tab 1: Overview ---
+    # --- Tab 1: Overview (editable, non-destructive save) ---
     with tabs[0]:
         if not ("fund_database" in st.secrets and "sheet_id" in st.secrets["fund_database"]):
             st.error("Missing 'fund_database' configuration in secrets.")
@@ -222,13 +222,11 @@ def show_fund_database() -> None:
         sheet_id = st.secrets["fund_database"]["sheet_id"]
         worksheet = st.secrets["fund_database"].get("worksheet", "fund database")
 
-        # Load full sheet via existing helper
         df = load_sheet(sheet_id, worksheet)
         if df.empty:
             st.warning("No rows found in the 'fund database' sheet.")
             df = pd.DataFrame()
 
-        # Filters
         f1, f2, f3 = st.columns(3)
         with f1:
             macro_vals = sorted(df["Brightside Macro"].dropna().unique().tolist()) if "Brightside Macro" in df.columns else []
@@ -248,7 +246,6 @@ def show_fund_database() -> None:
         if sel_asset and "Asset Class" in filtered.columns:
             filtered = filtered[filtered["Asset Class"].isin(sel_asset)]
 
-        # Visible + editable scope
         _ALLOWED_COLS = [
             "Fund Name",
             "Manager",
@@ -263,12 +260,10 @@ def show_fund_database() -> None:
         display_df = filtered[show_cols].copy() if show_cols else filtered.copy()
         display_df = display_df.reindex(columns=show_cols)
 
-        # Top-right save button
         top_l, top_r = st.columns([1, 0.18])
         with top_r:
-            # do_save = st.button("save changes", type="primary", use_container_width=True)
+            do_save = st.button("save changes", type="primary", use_container_width=True)
 
-        # Editable grid (lock Fund Name)
         gb = GridOptionsBuilder.from_dataframe(display_df if not display_df.empty else pd.DataFrame(columns=_ALLOWED_COLS))
         gb.configure_default_column(editable=True, resizable=True, filter=True)
         gb.configure_column("Fund Name", editable=False)
@@ -285,7 +280,6 @@ def show_fund_database() -> None:
         )
         edited_df = pd.DataFrame(grid["data"])
 
-        # Patch only changed cells (non-destructive)
         if do_save:
             def _normalize(cell):
                 if cell is None:
@@ -312,7 +306,6 @@ def show_fund_database() -> None:
                 if missing:
                     raise RuntimeError(f"Missing columns in sheet: {missing}")
 
-                # Build row map in sheet
                 key_to_rownum = {}
                 for i, row_vals in enumerate(values[1:], start=2):
                     row_dict = {h: (row_vals[j] if j < len(row_vals) else "") for j, h in enumerate(header)}
@@ -330,7 +323,7 @@ def show_fund_database() -> None:
                 for _, row in edited_view.iterrows():
                     key = row["_key"]
                     if not key or key not in key_to_rownum:
-                        continue  # skip rows we cannot safely match
+                        continue
                     rnum = key_to_rownum[key]
                     rows_touched.add(rnum)
                     raw = values[rnum - 1] if rnum - 1 < len(values) else []
@@ -352,14 +345,65 @@ def show_fund_database() -> None:
             except Exception as exc:
                 st.error(f"Failed to save to Google Sheet: {exc}")
 
-    # --- Tab 2: Dilligence ---
+    # --- Tab 2: Liquidity & Ops (read-only grid with same filters) ---
     with tabs[1]:
-        st.info("Add content here.")
+        if not ("fund_database" in st.secrets and "sheet_id" in st.secrets["fund_database"]):
+            st.error("Missing 'fund_database' configuration in secrets.")
+            return
+        sheet_id = st.secrets["fund_database"]["sheet_id"]
+        worksheet = st.secrets["fund_database"].get("worksheet", "fund database")
 
-    # --- Tab 3: Liquidity Terms ---
-    with tabs[2]:
-        st.info("Add content here.")
+        df = load_sheet(sheet_id, worksheet)
+        if df.empty:
+            st.warning("No rows found in the 'fund database' sheet.")
+            df = pd.DataFrame()
 
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            macro_vals = sorted(df["Brightside Macro"].dropna().unique().tolist()) if "Brightside Macro" in df.columns else []
+            sel_macro = st.multiselect("Brightside Macro", macro_vals, default=[])
+        with f2:
+            status_vals = sorted(df["Status"].dropna().unique().tolist()) if "Status" in df.columns else []
+            sel_status = st.multiselect("Status", status_vals, default=[])
+        with f3:
+            asset_vals = sorted(df["Asset Class"].dropna().unique().tolist()) if "Asset Class" in df.columns else []
+            sel_asset = st.multiselect("Asset Class", asset_vals, default=[])
+
+        filtered = df.copy()
+        if sel_macro and "Brightside Macro" in filtered.columns:
+            filtered = filtered[filtered["Brightside Macro"].isin(sel_macro)]
+        if sel_status and "Status" in filtered.columns:
+            filtered = filtered[filtered["Status"].isin(sel_status)]
+        if sel_asset and "Asset Class" in filtered.columns:
+            filtered = filtered[filtered["Asset Class"].isin(sel_asset)]
+
+        liquidity_cols = [
+            "Fund Name",
+            "Redemption Term",
+            "Notice days before redemption",
+            "Lock Up",
+            "Level Gate",
+            "Fund Administrator",
+            "Fund Domicile",
+            "Firm Domicile",
+        ]
+        show_cols2 = [c for c in liquidity_cols if c in filtered.columns]
+        display_df2 = filtered[show_cols2].copy() if show_cols2 else filtered.copy()
+        display_df2 = display_df2.reindex(columns=show_cols2)
+
+        gb2 = GridOptionsBuilder.from_dataframe(display_df2 if not display_df2.empty else pd.DataFrame(columns=liquidity_cols))
+        gb2.configure_default_column(editable=False, resizable=True, filter=True)
+        gb2.configure_grid_options(rowSelection="single")
+        AgGrid(
+            display_df2,
+            gridOptions=gb2.build(),
+            theme="streamlit",
+            enable_enterprise_modules=False,
+            allow_unsafe_jscode=False,
+            fit_columns_on_grid_load=True,
+            update_mode="NO_UPDATE",
+            reload_data=False,
+        )
 
 
 # ---- Existing product pages (kept as-is) ----
