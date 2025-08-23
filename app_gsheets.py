@@ -1402,25 +1402,24 @@ def show_fund_monitor() -> None:
         spacer = lambda h=12: st.markdown(f"<div style='height:{h}px'></div>", unsafe_allow_html=True)
 
         # ===== Row 0: Fund Name (big), Summary (multiline), Inception (top-right) =====
-        t1, t2, t3 = st.columns([1, 2, 1])
+        t1, t2 = st.columns([1, 2])
         with t1:
             _fm_scorecard("Fund Name", _fm_get_val(profile_row, "Fund Name", fund_choice), big=True)
         with t2:
             _fm_scorecard("Summary", _fm_get_val(profile_row, "Summary"), multiline=True)
-        with t3:
-            _fm_scorecard("Inception", _fm_get_val(profile_row, "Inception"))
         spacer(12)
 
         # ===== Row 1: Asset Class, Type, Manager Name =====
-        r1c1, r1c2, r1c3 = st.columns(3)
+        r1c1, r1c2, r1c3, r1c4 = st.columns(4)
         with r1c1: _fm_scorecard("Asset Class", _fm_get_val(profile_row, "Asset Class"))
         with r1c2: _fm_scorecard("Type", _fm_get_val(profile_row, "Type"))
         with r1c3: _fm_scorecard("Manager Name", _fm_get_val(profile_row, "Manager Name"))
+        with r1c4: _fm_scorecard("Inception", _fm_get_val(profile_row, "Inception"))
         spacer(12)
 
         # ===== Row 2: Size, Time Horizon, Style, Geo, Sector =====
         r2c1, r2c2, r2c3, r2c4, r2c5 = st.columns(5)
-        with r2c1: _fm_scorecard("Size", _fm_get_val(profile_row, "AUM (in USD Millions)"))
+        with r2c1: _fm_scorecard("AUM (in USD Millions)", _fm_get_val(profile_row, "AUM (in USD Millions)"))
         with r2c2: _fm_scorecard("Time Horizon", _fm_get_val(profile_row, "Time Horizon"))
         with r2c3: _fm_scorecard("Style", _fm_get_val(profile_row, "Style"))
         with r2c4: _fm_scorecard("Geo", _fm_get_val(profile_row, "Geo"))
@@ -1439,22 +1438,56 @@ def show_fund_monitor() -> None:
         # ===== Narrative sections (expanders, expanded by default) =====
         n1c1, n1c2 = st.columns(2)
         with n1c1:
-            with st.expander("Market Opportunity", expanded=True):
-                st.markdown(_fm_md_text(_fm_get_val(profile_row, "Market Opportunity")), unsafe_allow_html=True)
-        with n1c2:
-            with st.expander("Risks", expanded=True):
-                st.markdown(_fm_md_text(_fm_get_val(profile_row, "Risks")), unsafe_allow_html=True)
+                with st.expander("Market Opportunity", expanded=True):
+                    val = _fm_get_val(profile_row, "Market Opportunity")
+                    bullets = _split_bullets(val)
+                    if bullets:
+                        for b in bullets:
+                            st.markdown(f"- {b}")
+                    else:
+                        st.markdown(_fm_md_text(val), unsafe_allow_html=True)
 
+            with n1c2:
+                with st.expander("Risks", expanded=True):
+                    val = _fm_get_val(profile_row, "Risks")
+                    bullets = _split_bullets(val)
+                    if bullets:
+                        for b in bullets:
+                            st.markdown(f"- {b}")
+                    else:
+                        st.markdown(_fm_md_text(val), unsafe_allow_html=True)
+            
         n2c1, n2c2, n2c3 = st.columns(3)
         with n2c1:
             with st.expander("Team Background", expanded=True):
-                st.markdown(_fm_md_text(_fm_get_val(profile_row, "Team Background")), unsafe_allow_html=True)
+                val = _fm_get_val(profile_row, "Team Background")
+                bullets = _split_bullets(val)
+                if bullets:
+                    for b in bullets:
+                        st.markdown(f"- {b}")
+                else:
+                    st.markdown(_fm_md_text(val), unsafe_allow_html=True)
+
         with n2c2:
             with st.expander("Edge / What they do", expanded=True):
-                st.markdown(_fm_md_text(_fm_get_val(profile_row, "Edge / What they do")), unsafe_allow_html=True)
+                val = _fm_get_val(profile_row, "Edge / What they do")
+                bullets = _split_bullets(val)
+                if bullets:
+                    for b in bullets:
+                        st.markdown(f"- {b}")
+                else:
+                    st.markdown(_fm_md_text(val), unsafe_allow_html=True)
+
         with n2c3:
             with st.expander("Portfolio", expanded=True):
-                st.markdown(_fm_md_text(_fm_get_val(profile_row, "Portfolio")), unsafe_allow_html=True)
+                val = _fm_get_val(profile_row, "Portfolio")
+                bullets = _split_bullets(val)
+                if bullets:
+                    for b in bullets:
+                        st.markdown(f"- {b}")
+                else:
+                    st.markdown(_fm_md_text(val), unsafe_allow_html=True)
+
 
         st.markdown("---")
         hc1, hc2 = st.columns(2)
