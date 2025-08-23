@@ -1281,19 +1281,19 @@ def _fm_lookup_profile(db: pd.DataFrame, fund_choice: str, selected_canonical_id
     return None
 
 # ---------- scorecard HTML ----------
-def _fm_scorecard(label: str, value: str, desc: str = "") -> None:
+def _fm_scorecard(label: str, value: str, *, big: bool = False, multiline: bool = False) -> None:
     v = value if (value is not None and str(value).strip() != "") else "-"
-    d = desc or "&nbsp;"
+    content = _fm_md_text(v) if multiline else str(v)
     st.markdown(
         f"""
-        <div style="border:1px solid #e5e7eb;border-radius:12px;padding:10px 12px;height:100%;background:#ffffff;">
+        <div style="border:none;border-radius:12px;padding:10px 12px;height:100%;">
           <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.04em">{label}</div>
-          <div style="font-size:20px;font-weight:600;margin-top:4px">{v}</div>
-          <div style="font-size:12px;color:#9ca3af;margin-top:6px">{d}</div>
+          <div style="font-size:{28 if big else 20}px;font-weight:600;margin-top:4px">{content}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
 
 # ---------- public entry: call this from main router ----------
 def show_fund_monitor() -> None:
@@ -1354,8 +1354,9 @@ def show_fund_monitor() -> None:
     # --------------------------------
     # Tab 1: Overview
     # --------------------------------
+    # ====================== OVERVIEW TAB (drop-in replacement) ======================
     with tabs[0]:
-        # ---- Profile from Fund Database ----
+        # ---- Load profile row from Fund Database ----
         profile_row = None
         try:
             if "fund_database" in st.secrets and "sheet_id" in st.secrets["fund_database"]:
@@ -1367,79 +1368,65 @@ def show_fund_monitor() -> None:
         except Exception:
             profile_row = None
 
-        # ---- descriptions for scorecards ----
-        FIELD_DESC = {
-            "Asset Class": "Primary investment universe.",
-            "Type": "Directional posture or mandate.",
-            "AUM (in USD Millions)": "Strategy size in USD millions.",
-            "Time Horizon": "Typical holding period.",
-            "Style": "Investment style tilt.",
-            "Geo": "Main geography focus.",
-            "Sector": "Primary sector focus.",
-            "Avg # Positions": "Average number of active positions.",
-            "Avg Gross": "Typical gross exposure.",
-            "Avg Net": "Typical net exposure.",
-            "Management Fee": "Annual management fee.",
-            "Performance Fee": "Incentive fee on profits.",
-            "Inception": "Strategy start year/date.",
-        }
+        spacer = lambda h=12: st.markdown(f"<div style='height:{h}px'></div>", unsafe_allow_html=True)
 
-        # ===== Top row: Fund Name + Summary =====
+        # ===== Row 0: Fund Name + Summary (both as scorecards) =====
         t1, t2 = st.columns([1, 2])
         with t1:
-            st.markdown(
-                f"<div style='font-size:28px;font-weight:700;line-height:1.1'>"
-                f"{_fm_get_val(profile_row, 'Fund Name', fund_choice)}</div>",
-                unsafe_allow_html=True,
-            )
+            _fm_scorecard("Fund Name", _fm_get_val(profile_row, "Fund Name", fund_choice), big=True)
         with t2:
-            st.markdown(_fm_md_text(_fm_get_val(profile_row, "Summary")), unsafe_allow_html=True)
+            _fm_scorecard("Summary", _fm_get_val(profile_row, "Summary"), multiline=True)
+        spacer(12)
 
-        # ===== Scorecards with descriptions =====
-        c1, c2 = st.columns(2)
-        with c1: _fm_scorecard("Asset Class", _fm_get_val(profile_row, "Asset Class"), FIELD_DESC["Asset Class"])
-        with c2: _fm_scorecard("Type", _fm_get_val(profile_row, "Type"), FIELD_DESC["Type"])
+        # ===== Row 1: Asset Class, Type =====
+        r1c1, r1c2 = st.columns(2)
+        with r1c1: _fm_scorecard("Asset Class", _fm_get_val(profile_row, "Asset Class"))
+        with r1c2: _fm_scorecard("Type", _fm_get_val(profile_row, "Type"))
+        spacer(12)
 
-        c3, c4, c5, c6, c7 = st.columns(5)
-        with c3: _fm_scorecard("Size", _fm_get_val(profile_row, "AUM (in USD Millions)"), FIELD_DESC["AUM (in USD Millions)"])
-        with c4: _fm_scorecard("Time Horizon", _fm_get_val(profile_row, "Time Horizon"), FIELD_DESC["Time Horizon"])
-        with c5: _fm_scorecard("Style", _fm_get_val(profile_row, "Style"), FIELD_DESC["Style"])
-        with c6: _fm_scorecard("Geo", _fm_get_val(profile_row, "Geo"), FIELD_DESC["Geo"])
-        with c7: _fm_scorecard("Sector", _fm_get_val(profile_row, "Sector"), FIELD_DESC["Sector"])
+        # ===== Row 2: Size, Time Horizon, Style, Geo, Sector =====
+        r2c1, r2c2, r2c3, r2c4, r2c5 = st.columns(5)
+        with r2c1: _fm_scorecard("Size", _fm_get_val(profile_row, "AUM (in USD Millions)"))
+        with r2c2: _fm_scorecard("Time Horizon", _fm_get_val(profile_row, "Time Horizon"))
+        with r2c3: _fm_scorecard("Style", _fm_get_val(profile_row, "Style"))
+        with r2c4: _fm_scorecard("Geo", _fm_get_val(profile_row, "Geo"))
+        with r2c5: _fm_scorecard("Sector", _fm_get_val(profile_row, "Sector"))
+        spacer(12)
 
-        c8, c9, c10, c11, c12, c13 = st.columns(6)
-        with c8: _fm_scorecard("Avg # Positions", _fm_get_val(profile_row, "Avg # Positions"), FIELD_DESC["Avg # Positions"])
-        with c9: _fm_scorecard("Avg Gross", _fm_get_val(profile_row, "Avg Gross"), FIELD_DESC["Avg Gross"])
-        with c10: _fm_scorecard("Avg Net", _fm_get_val(profile_row, "Avg Net"), FIELD_DESC["Avg Net"])
-        with c11: _fm_scorecard("Management Fee", _fm_get_val(profile_row, "Management Fee"), FIELD_DESC["Management Fee"])
-        with c12: _fm_scorecard("Performance Fee", _fm_get_val(profile_row, "Performance Fee"), FIELD_DESC["Performance Fee"])
-        with c13: _fm_scorecard("Inception", _fm_get_val(profile_row, "Inception"), FIELD_DESC["Inception"])
+        # ===== Row 3: Avg # Positions, Avg Gross, Avg Net, Mgmt Fee, Perf Fee, Inception =====
+        r3 = st.columns(6)
+        with r3[0]: _fm_scorecard("Avg # Positions", _fm_get_val(profile_row, "Avg # Positions"))
+        with r3[1]: _fm_scorecard("Avg Gross", _fm_get_val(profile_row, "Avg Gross"))
+        with r3[2]: _fm_scorecard("Avg Net", _fm_get_val(profile_row, "Avg Net"))
+        with r3[3]: _fm_scorecard("Management Fee", _fm_get_val(profile_row, "Management Fee"))
+        with r3[4]: _fm_scorecard("Performance Fee", _fm_get_val(profile_row, "Performance Fee"))
+        with r3[5]: _fm_scorecard("Inception", _fm_get_val(profile_row, "Inception"))
+        spacer(12)
 
         # ===== Narrative sections (expanders, expanded by default; exact labels) =====
-        r1c1, r1c2 = st.columns(2)
-        with r1c1:
+        n1c1, n1c2 = st.columns(2)
+        with n1c1:
             with st.expander("Market Opportunity", expanded=True):
                 st.markdown(_fm_md_text(_fm_get_val(profile_row, "Market Opportunity")), unsafe_allow_html=True)
-        with r1c2:
+        with n1c2:
             with st.expander("Risks", expanded=True):
                 st.markdown(_fm_md_text(_fm_get_val(profile_row, "Risks")), unsafe_allow_html=True)
 
-        r2c1, r2c2, r2c3 = st.columns(3)
-        with r2c1:
+        n2c1, n2c2, n2c3 = st.columns(3)
+        with n2c1:
             with st.expander("Team Background", expanded=True):
                 st.markdown(_fm_md_text(_fm_get_val(profile_row, "Team Background")), unsafe_allow_html=True)
-        with r2c2:
+        with n2c2:
             with st.expander("Edge / What they do", expanded=True):
                 st.markdown(_fm_md_text(_fm_get_val(profile_row, "Edge / What they do")), unsafe_allow_html=True)
-        with r2c3:
+        with n2c3:
             with st.expander("Portfolio", expanded=True):
                 st.markdown(_fm_md_text(_fm_get_val(profile_row, "Portfolio")), unsafe_allow_html=True)
 
         st.markdown("---")
 
-        # ===== Cumulative Return + AUM history =====
+        # ===== Cumulative Return + AUM history (unchanged) =====
         hc1, hc2 = st.columns(2)
-
         with hc1:
             st.subheader("Cumulative Performance")
             track_record = fetch_track_record_json(selected_canonical_id)
@@ -1467,8 +1454,6 @@ def show_fund_monitor() -> None:
                             .properties(height=350)
                         )
                         st.altair_chart(ch, use_container_width=True)
-                else:
-                    st.info("No return series available.")
             else:
                 st.info("No return series available.")
 
@@ -1497,6 +1482,10 @@ def show_fund_monitor() -> None:
                 st.altair_chart(ch, use_container_width=True)
             else:
                 st.info("No AUM history available.")
+    # ==================== END OVERVIEW TAB ====================
+
+
+
 
     # --------------------------------
     # Tab 2: Exposures  (everything except historical AUM/returns)
