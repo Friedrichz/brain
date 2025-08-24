@@ -2185,20 +2185,33 @@ import base64  # keep near the top with other imports
 def main() -> None:
     st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
 
-    # Sidebar background only (dark blue) + logo spacing; no other theming
+    # ---------- CSS ----------
     st.markdown(
         """
         <style>
         [data-testid="stSidebar"] { background-color: #1d2533 !important; }
-        [data-testid="stSidebar"] .block-container { padding-top: 8px; }
-        .sidebar-logo { text-align:center; padding: 12px 0 40px 0; }
-        .sidebar-logo img { width: 90px; height: auto; } /* smaller logo */
+        [data-testid="stSidebar"] .block-container { background: transparent !important; padding-top: 8px; }
+
+        /* Logo */
+        .sidebar-logo { text-align:center; padding: 12px 0 24px 0; }
+        .sidebar-logo img { width: 90px; height: auto; }
+
+        /* Force all sidebar text/buttons white */
+        [data-testid="stSidebar"] * { color: #ffffff !important; }
+
+        /* Selected item: bold + subtle left border */
+        .nav-item-selected {
+            font-weight: 700;
+            padding: 8px 4px;
+            margin: 2px 0;
+            border-left: 3px solid #ffffff66;
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # Sidebar logo
+    # ---------- Sidebar: logo at top ----------
     try:
         with open("logo_bs.png", "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -2209,18 +2222,36 @@ def main() -> None:
     except Exception:
         pass
 
-    # Native Streamlit navigation (clean sidebar, no arrows/icons)
-    nav = st.navigation(
-        [
-            st.Page(show_fund_database, title="Fund Database"),
-            st.Page(show_fund_monitor, title="Fund Monitor"),
-            st.Page(show_performance_view, title="Performance Est"),
-            st.Page(show_market_view, title="Market Views"),
-            st.Page(show_market_analytics, title="Market Analytics"),
-        ]
-    )
-    nav.run()
+    # ---------- Sidebar: nav menu ----------
+    PAGES = ["Fund Database", "Fund Monitor", "Performance Est", "Market Views", "Market Analytics"]
+    if "page" not in st.session_state:
+        st.session_state["page"] = PAGES[0]
 
+    for name in PAGES:
+        if name == st.session_state["page"]:
+            st.sidebar.markdown(f'<div class="nav-item-selected">{name}</div>', unsafe_allow_html=True)
+        else:
+            if st.sidebar.button(name, key=f"nav_{name}"):
+                st.session_state["page"] = name
+
+    page = st.session_state["page"]
+
+    # ---------- Router ----------
+    if page == "Fund Database":
+        st.header("Fund Database")
+        show_fund_database()
+    elif page == "Performance Est":
+        st.header("Performance Estimates")
+        show_performance_view()
+    elif page == "Market Views":
+        st.header("Market Views")
+        show_market_view()
+    elif page == "Fund Monitor":
+        st.header("Fund Monitor")
+        show_fund_monitor()
+    elif page == "Market Analytics":
+        st.header("Market Analytics")
+        show_market_analytics()
 
 
 if __name__ == "__main__":
