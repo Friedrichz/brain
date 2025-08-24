@@ -226,7 +226,8 @@ def show_fund_database() -> None:
             st.warning("No rows found in the 'fund database' sheet.")
             df = pd.DataFrame()
 
-        f1, f2, f3 = st.columns(3)
+        # AFTER   (Overview)
+        f1, f2, f3, f4 = st.columns(4)
         with f1:
             macro_vals = sorted(df["Brightside Macro"].dropna().unique().tolist()) if "Brightside Macro" in df.columns else []
             sel_macro = st.multiselect("Brightside Macro", macro_vals, default=[], key="fd_ov_macro")
@@ -236,6 +237,9 @@ def show_fund_database() -> None:
         with f3:
             asset_vals = sorted(df["Asset Class"].dropna().unique().tolist()) if "Asset Class" in df.columns else []
             sel_asset = st.multiselect("Asset Class", asset_vals, default=[], key="fd_ov_asset")
+        with f4:
+            fund_vals = sorted(df["Fund Name"].dropna().unique().tolist()) if "Fund Name" in df.columns else []
+            sel_funds = st.multiselect("Fund Name", fund_vals, default=[], key="fd_ov_funds")
 
         filtered = df.copy()
         if sel_macro and "Brightside Macro" in filtered.columns:
@@ -244,6 +248,9 @@ def show_fund_database() -> None:
             filtered = filtered[filtered["Status"].isin(sel_status)]
         if sel_asset and "Asset Class" in filtered.columns:
             filtered = filtered[filtered["Asset Class"].isin(sel_asset)]
+        if sel_funds and "Fund Name" in filtered.columns:
+            filtered = filtered[filtered["Fund Name"].isin(sel_funds)]
+
 
         _ALLOWED_COLS = [
             "Fund Name",
@@ -358,7 +365,8 @@ def show_fund_database() -> None:
             st.warning("No rows found in the 'fund database' sheet.")
             df = pd.DataFrame()
 
-        f1, f2, f3 = st.columns(3)
+        # AFTER   (Liquidity & Ops)
+        f1, f2, f3, f4 = st.columns(4)
         with f1:
             macro_vals = sorted(df["Brightside Macro"].dropna().unique().tolist()) if "Brightside Macro" in df.columns else []
             sel_macro = st.multiselect("Brightside Macro", macro_vals, default=[], key="fd_lo_macro")
@@ -368,6 +376,9 @@ def show_fund_database() -> None:
         with f3:
             asset_vals = sorted(df["Asset Class"].dropna().unique().tolist()) if "Asset Class" in df.columns else []
             sel_asset = st.multiselect("Asset Class", asset_vals, default=[], key="fd_lo_asset")
+        with f4:
+            fund_vals = sorted(df["Fund Name"].dropna().unique().tolist()) if "Fund Name" in df.columns else []
+            sel_funds = st.multiselect("Fund Name", fund_vals, default=[], key="fd_lo_funds")
 
         filtered = df.copy()
         if sel_macro and "Brightside Macro" in filtered.columns:
@@ -376,6 +387,9 @@ def show_fund_database() -> None:
             filtered = filtered[filtered["Status"].isin(sel_status)]
         if sel_asset and "Asset Class" in filtered.columns:
             filtered = filtered[filtered["Asset Class"].isin(sel_asset)]
+        if sel_funds and "Fund Name" in filtered.columns:
+            filtered = filtered[filtered["Fund Name"].isin(sel_funds)]
+
 
         liquidity_cols = [
             "Fund Name",
@@ -1400,7 +1414,8 @@ def show_fund_monitor() -> None:
         return
 
     # ========= Tabs =========
-    tabs = st.tabs(["Overview", "Exposures", "Quant"])
+    tabs = st.tabs(["Overview", "Portfolio Exposures", "Manager Updates", "Quant"])
+
 
     # --------------------------------
     # Tab 1: Overview
@@ -1579,12 +1594,10 @@ def show_fund_monitor() -> None:
                     st.altair_chart(ch, use_container_width=True)
                 else:
                     st.info("No AUM history available.")
-    # ==================== END OVERVIEW TAB ====================
-
 
 
     # --------------------------------
-    # Tab 2: Exposures  (everything except historical AUM/returns)
+    # Tab 2: Portfolio Exposures  (everything except historical AUM/returns)
     # --------------------------------
     with tabs[1]:
         dates = sorted(fund_df["date"].dropna().unique().tolist(), reverse=True)
@@ -1614,61 +1627,36 @@ def show_fund_monitor() -> None:
         mcols[3].metric("Long", row.get("long"))
         mcols[4].metric("Short", row.get("short"))
 
-        # last summary + positions
-        st.subheader("Last Summary & Positions")
-        sc1, sc2 = st.columns([3, 1])
-        with sc1:
-            bullets, repdate = [], None
-            try:
-                letters = _load_letters()
-            except Exception:
-                letters = pd.DataFrame()
-            if (
-                not letters.empty
-                and {"fund_id", "report_date", "letter_summary_5_bullets"} <= set(letters.columns)
-            ):
-                fl = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
-                fl["report_date"] = pd.to_datetime(fl["report_date"], errors="coerce")
-                if fl["report_date"].notna().any():
-                    repdate = fl["report_date"].max()
-                    bullets = _split_bullets(fl.loc[fl["report_date"] == repdate, "letter_summary_5_bullets"].iloc[0])
-            if bullets:
-                st.markdown(f"**Latest report:** {repdate.date() if repdate is not None else ''}")
-                for b in bullets:
-                    st.markdown(f"- {b}")
-            else:
-                st.info("No recent summary available.")
 
-        with sc2:
-            st.markdown("**Top 10 Positions**")
-            try:
-                letters = _load_letters()
-            except Exception:
-                letters = pd.DataFrame()
-            if letters.empty or not {"fund_id", "report_date", "position_ticker", "position_weight_percent"} <= set(letters.columns):
+        st.markdown("**Top 10 Positions**")
+        try:
+            letters = _load_letters()
+        except Exception:
+            letters = pd.DataFrame()
+        if letters.empty or not {"fund_id", "report_date", "position_ticker", "position_weight_percent"} <= set(letters.columns):
+            st.info("No positions available.")
+        else:
+            dfp = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
+            dfp["report_date"] = pd.to_datetime(dfp["report_date"], errors="coerce")
+            if dfp.empty or dfp["report_date"].dropna().empty:
                 st.info("No positions available.")
             else:
-                dfp = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
-                dfp["report_date"] = pd.to_datetime(dfp["report_date"], errors="coerce")
-                if dfp.empty or dfp["report_date"].dropna().empty:
-                    st.info("No positions available.")
-                else:
-                    latest_rd = dfp["report_date"].max()
-                    dfp = dfp[dfp["report_date"] == latest_rd].copy()
-                    for c in ["position_name", "position_sector"]:
-                        if c not in dfp.columns:
-                            dfp[c] = None
-                    view = dfp[["position_name", "position_ticker", "position_sector", "position_weight_percent"]].rename(
-                        columns={
-                            "position_name": "Position Name",
-                            "position_ticker": "Position Ticker",
-                            "position_sector": "Position Sector",
-                            "position_weight_percent": "Position Weight (%)",
-                        }
-                    ).copy()
-                    view["Position Weight (%)"] = pd.to_numeric(view["Position Weight (%)"], errors="coerce")
-                    view = view.dropna(subset=["Position Ticker"]).sort_values("Position Weight (%)", ascending=False).head(10)
-                    st.dataframe(_fm_arrow_safe(view), use_container_width=True)
+                latest_rd = dfp["report_date"].max()
+                dfp = dfp[dfp["report_date"] == latest_rd].copy()
+                for c in ["position_name", "position_sector"]:
+                    if c not in dfp.columns:
+                        dfp[c] = None
+                view = dfp[["position_name", "position_ticker", "position_sector", "position_weight_percent"]].rename(
+                    columns={
+                        "position_name": "Position Name",
+                        "position_ticker": "Position Ticker",
+                        "position_sector": "Position Sector",
+                        "position_weight_percent": "Position Weight (%)",
+                    }
+                ).copy()
+                view["Position Weight (%)"] = pd.to_numeric(view["Position Weight (%)"], errors="coerce")
+                view = view.dropna(subset=["Position Ticker"]).sort_values("Position Weight (%)", ascending=False).head(10)
+                st.dataframe(_fm_arrow_safe(view), use_container_width=True)
 
         # exposures tables
         st.subheader("Exposures")
@@ -1719,9 +1707,75 @@ def show_fund_monitor() -> None:
                 st.altair_chart(ch, use_container_width=True)
 
     # --------------------------------
-    # Tab 3: Quant
+    # Tab 3: Manager Updates
     # --------------------------------
     with tabs[2]:
+        st.subheader("Manager Updates")
+        col_left, col_right = st.columns([3, 2])
+
+        # Left column: Last Summary & Positions  (moved from Exposures)
+        with col_left:
+            st.markdown("### Last Summary & Positions")
+            bullets, repdate = [], None
+            try:
+                letters = _load_letters()
+            except Exception:
+                letters = pd.DataFrame()
+            if (
+                not letters.empty
+                and {"fund_id", "report_date", "letter_summary_5_bullets"} <= set(letters.columns)
+            ):
+                fl = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
+                fl["report_date"] = pd.to_datetime(fl["report_date"], errors="coerce")
+                if fl["report_date"].notna().any():
+                    repdate = fl["report_date"].max()
+                    bullets = _split_bullets(fl.loc[fl["report_date"] == repdate, "letter_summary_5_bullets"].iloc[0])
+            if bullets:
+                st.markdown(f"**Latest report:** {repdate.date() if repdate is not None else ''}")
+                for b in bullets:
+                    st.markdown(f"- {b}")
+            else:
+                st.info("No recent summary available.")
+
+            st.markdown("**Top 10 Positions**")
+            try:
+                letters = _load_letters()
+            except Exception:
+                letters = pd.DataFrame()
+            if letters.empty or not {"fund_id", "report_date", "position_ticker", "position_weight_percent"} <= set(letters.columns):
+                st.info("No positions available.")
+            else:
+                dfp = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
+                dfp["report_date"] = pd.to_datetime(dfp["report_date"], errors="coerce")
+                if dfp.empty or dfp["report_date"].dropna().empty:
+                    st.info("No positions available.")
+                else:
+                    latest_rd = dfp["report_date"].max()
+                    dfp = dfp[dfp["report_date"] == latest_rd].copy()
+                    for c in ["position_name", "position_sector"]:
+                        if c not in dfp.columns:
+                            dfp[c] = None
+                    view = dfp[["position_name", "position_ticker", "position_sector", "position_weight_percent"]].rename(
+                        columns={
+                            "position_name": "Position Name",
+                            "position_ticker": "Position Ticker",
+                            "position_sector": "Position Sector",
+                            "position_weight_percent": "Position Weight (%)",
+                        }
+                    ).copy()
+                    view["Position Weight (%)"] = pd.to_numeric(view["Position Weight (%)"], errors="coerce")
+                    view = view.dropna(subset=["Position Ticker"]).sort_values("Position Weight (%)", ascending=False).head(10)
+                    st.dataframe(_fm_arrow_safe(view), use_container_width=True)
+
+        # Right column: placeholder header for manager notes
+        with col_right:
+            st.markdown("### Last Manager Update Notes")
+            st.info("Placeholder for latest manager update notes. Connect to notes source and render here.")
+
+    # --------------------------------
+    # Tab 4: Quant
+    # --------------------------------
+    with tabs[3]:
         st.info("Quant analytics placeholder.")
 # ======================= END DROP-IN: Fund Monitor =======================
 
@@ -2246,7 +2300,7 @@ def main() -> None:
         [
             st.Page(show_fund_database, title="Fund Database"),
             st.Page(show_fund_monitor, title="Fund Monitor"),
-            st.Page(show_fund_positions, title="Fund Positions"),
+            st.Page(show_fund_positions, title="Fund Positions & Thesis"),
             st.Page(show_performance_view, title="Performance Estimates"),
             st.Page(show_market_view, title="Market Views"),
             st.Page(show_market_analytics, title="Market Analytics"),
