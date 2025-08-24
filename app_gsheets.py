@@ -2180,32 +2180,38 @@ def show_market_analytics():
 
 
 # ---- Main ----
-import base64  # keep near the top with other imports
-
 def main() -> None:
     st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
 
-    # Sidebar look only: dark bg + readable white nav text. Keep default red accents elsewhere.
+    # --- Sidebar styling: dark bg + white nav text only ---
     st.markdown(
         """
         <style>
         [data-testid="stSidebar"] { background-color: #1d2533 !important; }
-        [data-testid="stSidebar"] .block-container { padding-top: 10px; }
-        /* st.navigation renders anchors; force readable white */
-        [data-testid="stSidebar"] a { color: #ffffff !important; }
+        [data-testid="stSidebar"] .block-container { padding-top: 12px; }
+
+        /* st.navigation titles in the sidebar */
+        [data-testid="stSidebar"] nav a,
+        [data-testid="stSidebar"] [class*="stNavigation"] a {
+            color: #ffffff !important;          /* make titles white */
+        }
+        [data-testid="stSidebar"] nav a[aria-current="page"] {
+            color: #ffffff !important;          /* keep active item white */
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # Logo pinned above the nav
-    try:
-        st.logo("logo_bs.png")  # Streamlit ≥1.32 shows it in app header and sidebar header
-    except Exception:
-        # Fallback: still at top of sidebar because it’s rendered before the nav object is created
-        st.sidebar.image("logo_bs.png", width=90)
+    # --- Logo above nav, 50% larger (90px -> 135px) ---
+    st.sidebar.markdown(
+        '<div style="text-align:center; padding: 8px 0 20px 0;">'
+        '<img src="logo_bs.png" width="135" alt="logo" />'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
-    # Native, clean sidebar navigation (no buttons, no pills)
+    # --- Native navigation (keeps default Streamlit red accents on the right) ---
     nav = st.navigation(
         [
             st.Page(show_fund_database, title="Fund Database"),
@@ -2215,8 +2221,8 @@ def main() -> None:
             st.Page(show_market_analytics, title="Market Analytics"),
         ]
     )
-
     nav.run()
+
 
 if __name__ == "__main__":
     main()
