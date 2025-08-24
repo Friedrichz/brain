@@ -2174,9 +2174,9 @@ def show_market_analytics():
         return
 
     # Render both views on the same page with the same security
-    view_monthly_seasonality(ticker_override=ticker, start_year_override=start_year)
-    st.markdown("---")
     view_market_memory(ticker_override=ticker, start_year_override=start_year, k_override=k)
+    st.markdown("---")
+    view_monthly_seasonality(ticker_override=ticker, start_year_override=start_year)
 
 
 # ---- Main ----
@@ -2217,6 +2217,32 @@ def main() -> None:
         [data-testid="stSidebar"] svg * {
             fill: #ffffff !important;
             stroke: #ffffff !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <style>
+        /* Make the sidebar a positioning context */
+        [data-testid="stSidebar"] { position: relative; }
+
+        /* Pin the logo to the top-left of the sidebar */
+        [data-testid="stSidebar"] .stImage img[src*="logo_bs.png"] {
+            position: absolute;
+            top: 12px;
+            left: 16px;
+            width: 280px !important;     /* set desired logo width */
+            height: auto !important;
+            z-index: 10;                  /* above nav */
+            display: block;
+        }
+
+        /* Push the nav/menu down so it starts below the logo */
+        [data-testid="stSidebar"] .block-container {
+            padding-top: 170px !important;  /* tune: ≈ logo height + spacing */
         }
         </style>
         """,
