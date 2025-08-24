@@ -1272,6 +1272,16 @@ def _fm_return_to_float(x):
     # Guardrail against -100% (blows up cumprod)
     return max(f, -0.99)
 
+def _fm_percent_to_float(val):
+    """Return numeric percent value (e.g., '45%' -> 45.0; '0.45' -> 0.45). NaNs -> np.nan."""
+    v = percent_to_float(val)
+    if v is None:
+        return np.nan
+    try:
+        return float(v)
+    except Exception:
+        return np.nan
+
 
 # ---------- Sheet aliases (include exact narrative labels you confirmed) ----------
 # ===== PATCH 1: Update aliases (ensure this dict includes Manager Name) =====
@@ -1715,7 +1725,7 @@ def show_fund_monitor() -> None:
 
         # Left column: Last Summary & Positions  (moved from Exposures)
         with col_left:
-            st.markdown("### Last Summary & Positions")
+            st.markdown("### Latest Summary")
             bullets, repdate = [], None
             try:
                 letters = _load_letters()
