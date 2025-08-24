@@ -2223,6 +2223,19 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
+    st.markdown(
+        """
+        <style>
+        /* Enlarge the masthead logo */
+        [data-testid="stLogo"] img {
+            max-height: 270px !important; /* 135px × 2 */
+            width: auto !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
     # Logo in the official masthead (sits ABOVE the sidebar nav). 50% larger -> 135px.
     st.logo("logo_bs.png", size="large")  # Streamlit renders this before st.navigation
