@@ -2185,25 +2185,30 @@ def main() -> None:
 
     # Sidebar skin only. Keep default Streamlit theme for content.
     st.markdown(
-        """
-        <style>
-        /* Dark sidebar */
-        [data-testid="stSidebar"]{background:#1d2533!important;}
-        [data-testid="stSidebar"] .block-container{padding-top:10px;}
+    """
+    <style>
+    /* Dark sidebar */
+    [data-testid="stSidebar"]{background:#1d2533!important;}
+    [data-testid="stSidebar"] .block-container{padding-top:10px;}
 
-        /* Force white titles in the new st.navigation sidebar */
-        [data-testid="stSidebar"] nav a,
-        [data-testid="stSidebar"] [role="navigation"] a,
-        [data-testid="stSidebar"] [data-testid="stPageLink"],
-        [data-testid="stSidebar"] [role="link"]{
-            color:#ffffff!important; opacity:1!important;
-        }
-        [data-testid="stSidebar"] [aria-current="page"]{
-            color:#ffffff!important; opacity:1!important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
+    /* Force white titles in the st.navigation sidebar */
+    [data-testid="stSidebar"] nav a,
+    [data-testid="stSidebar"] [role="navigation"] a,
+    [data-testid="stSidebar"] [data-testid="stPageLink"],
+    [data-testid="stSidebar"] [role="link"],
+    [data-testid="stSidebar"] [role="listitem"] div {
+        color:#ffffff!important;
+        opacity:1!important;
+    }
+
+    /* Active/selected link */
+    [data-testid="stSidebar"] [aria-current="page"]{
+        color:#ffffff!important;
+        opacity:1!important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
     )
 
     # Logo in the official masthead (sits ABOVE the sidebar nav). 50% larger -> 135px.
