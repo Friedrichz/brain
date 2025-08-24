@@ -2439,7 +2439,7 @@ def show_market_analytics():
 
 # ---- Main ----
 def main() -> None:
-    st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
+    st.set_page_config(page_title="Investment Brain", layout="wide")
 
     # Sidebar skin only. Keep default Streamlit theme for content.
     st.markdown(
