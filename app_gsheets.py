@@ -2249,13 +2249,10 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    # Hide the header logo so we don’t see the capped version
-    st.markdown("<style>[data-testid='stLogo']{display:none !important}</style>", unsafe_allow_html=True)
-
     # Sidebar logo ABOVE navigation; keep your previous sidebar CSS untouched
     with st.sidebar:
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        st.image("logo_bs.png", width=240)  # increase as needed (e.g., 260–300)
+        st.image("logo_bs.png")  # increase as needed (e.g., 260–300)
         st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
     # Native navigation (no extra styling)
