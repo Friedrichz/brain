@@ -2239,11 +2239,11 @@ def main() -> None:
         display: block;
         position: relative;
         height: 90px;                    /* increase to make the logo larger */
-        margin: 10px 16px 16px 16px;       /* top/right/bottom/left */
+        margin: 30px 16px 16px 16px;       /* top/right/bottom/left */
         background-image: url("data:image/png;base64,{_logo_b64}");
         background-repeat: no-repeat;
         background-size: contain;         /* scales the image */
-        background-position: left top;
+        background-position: center top;
         }}
 
         /* Push nav/content down so it starts below the inserted logo */
