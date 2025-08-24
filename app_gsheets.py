@@ -1656,10 +1656,7 @@ def show_fund_monitor() -> None:
             track_record = fetch_track_record_json(selected_canonical_id)
 
             # normalize common shapes:
-            # - {"returns":[{"date":..., "return":...}, ...]}
-            # - [{"track_label":..., "data":[...], "meta":{...}}]
             if isinstance(track_record, list) and track_record:
-                # list wrapper → take first element
                 track_record = track_record[0] if isinstance(track_record[0], dict) else None
             if isinstance(track_record, dict) and "data" in track_record and isinstance(track_record["data"], list):
                 track_record = {"returns": track_record["data"]}
@@ -1676,7 +1673,28 @@ def show_fund_monitor() -> None:
 
                 if {"date", "return"} <= set(r.columns):
                     r["date"] = pd.to_datetime(r["date"], errors="coerce")
-                    r["return"] = r["return"].apply(_fm_return_to_float)
+
+                    # --- Robust return normalization (percent strings + pct‑points detection) ---
+                    s = r["return"].astype(str).str.strip()
+                    # percent strings -> decimals
+                    is_pct_str = s.str.endswith("%")
+                    vals = pd.to_numeric(s.where(~is_pct_str, s.str[:-1]), errors="coerce")
+                    vals = vals.where(~is_pct_str, vals / 100.0)
+
+                    # dataset-level detection: percentage‑points across the series
+                    # Trigger if any abs >= 2 OR the median abs >= 0.5, while max <= 100 (rules out already‑decimal data).
+                    max_abs = vals.abs().max(skipna=True)
+                    med_abs = vals.abs().median(skipna=True)
+                    has_big = (vals.abs() >= 2).any(skipna=True)
+                    is_pct_points_dataset = (pd.notna(max_abs) and max_abs <= 100) and (has_big or (pd.notna(med_abs) and med_abs >= 0.5))
+
+                    if is_pct_points_dataset:
+                        vals = vals / 100.0
+
+                    # guardrail against -100% collapsing the series
+                    vals = vals.clip(lower=-0.99)
+
+                    r["return"] = vals
                     r = r.dropna(subset=["date", "return"]).sort_values("date")
 
                     if not r.empty:
@@ -1687,10 +1705,7 @@ def show_fund_monitor() -> None:
                             .encode(
                                 x=alt.X("date:T", title="Date"),
                                 y=alt.Y("cum:Q", title="Cumulative Return", axis=alt.Axis(format="~%")),
-                                tooltip=[
-                                    alt.Tooltip("date:T"),
-                                    alt.Tooltip("cum:Q", title="Cumulative", format=".2%")
-                                ],
+                                tooltip=[alt.Tooltip("date:T"), alt.Tooltip("cum:Q", title="Cumulative", format=".2%")],
                             )
                             .properties(height=350)
                         )
@@ -1701,6 +1716,7 @@ def show_fund_monitor() -> None:
                     st.info("No return series available.")
             else:
                 st.info("No return series available.")
+
 
         # ---- Historical AUM (handles '6’600' etc) ----
         with hc2:
