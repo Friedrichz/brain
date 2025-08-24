@@ -1424,7 +1424,7 @@ def show_fund_monitor() -> None:
         return
 
     # ========= Tabs =========
-    tabs = st.tabs(["Overview", "Portfolio Exposures", "Manager Updates", "Quant"])
+    tabs = st.tabs(["Overview", "Portfolio Exposures", "Manager Updates", "Quant", "Newsflow"])
 
 
     # --------------------------------
@@ -1826,13 +1826,19 @@ def show_fund_monitor() -> None:
             )
 
         st.markdown("---")
-        st.markdown("### Suggested Questions for next Meeting:")
+        st.markdown("### Suggested Questions for next Meeting")
         st.info("Placeholder for suggested questions based on latest fund communications.")
     # --------------------------------
     # Tab 4: Quant
     # --------------------------------
     with tabs[3]:
         st.info("Quant analytics placeholder.")
+
+    # --------------------------------
+    # Tab 5: News
+    # --------------------------------
+    with tabs[4]:
+        st.info("News flow scraping (socials, google, etc) placeholder.")
 # ======================= END DROP-IN: Fund Monitor =======================
 
 
