@@ -51,6 +51,7 @@ def _page_header(title: str, bullets: list[str]) -> None:
     st.header(title)
     if bullets:
         st.markdown("\n".join(f"- {b}" for b in bullets))
+    return
 
 # --- Drive scopes / helpers (existing) ---
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
@@ -469,6 +470,10 @@ def show_fund_database() -> None:
 # ---- Existing product pages (kept as-is) ----
 
 def show_performance_view() -> None:
+    _page_header("Performance Estimates", [
+        "Estimates are extracted directly from incoming emails to investment.coverage@brightside-capital.com and collected here, sorted by date."
+    ])
+
     # Uses fund_performances and securities_master like your original implementation:contentReference[oaicite:3]{index=3}
     if not ("fund_performances" in st.secrets and "sheet_id" in st.secrets["fund_performances"]):
         st.error("Missing 'fund_performances' configuration in secrets.")
