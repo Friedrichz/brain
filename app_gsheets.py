@@ -2223,29 +2223,38 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
+    # replace your current "logo" <style> block with this
     st.markdown(
         """
         <style>
-        /* Target the logo in the app header (added via st.logo) */
-        [data-testid="stLogo"] {
-            max-height: 270px !important;  /* double the default ~135px */
-            height: 270px !important;
-            width: auto !important;
+        /* Increase header height so a larger logo is actually visible */
+        [data-testid="stHeader"] {
+            height: 190px !important;           /* was ~60–80px */
+            min-height: 190px !important;
         }
+        [data-testid="stHeader"] > div {
+            height: 190px !important;
+            min-height: 190px !important;
+        }
+
+        /* Enlarge the logo itself */
+        [data-testid="stLogo"],
         [data-testid="stLogo"] img {
-            max-height: 270px !important;
-            height: 270px !important;
+            height: 300px !important;           /* > 2× default ~135px */
+            max-height: 300px !important;
             width: auto !important;
         }
+
+        /* Fallback: force 2× scale even if upstream size rules change */
+        [data-testid="stLogo"] { transform: scale(2); transform-origin: top left; }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
+    # keep your existing call
+    st.logo("logo_bs.png", size="large")
 
-
-    # Logo in the official masthead (sits ABOVE the sidebar nav). 50% larger -> 135px.
-    st.logo("logo_bs.png", size="large")  # Streamlit renders this before st.navigation
     st.sidebar.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
     # Native navigation (no extra styling)
