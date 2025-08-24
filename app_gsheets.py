@@ -2223,37 +2223,42 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        """
-        <style>
-        /* Make the sidebar a positioning context */
-        [data-testid="stSidebar"] { position: relative; }
+    # Read logo and inject it as a pinned pseudo-element above the nav
+    import base64, io
+    with open("logo_bs.png", "rb") as _f:
+        _logo_b64 = base64.b64encode(_f.read()).decode("ascii")
 
-        /* Pin the logo to the top-left of the sidebar */
-        [data-testid="stSidebar"] .stImage img[src*="logo_bs.png"] {
-            position: absolute;
-            top: 12px;
-            left: 16px;
-            width: 280px !important;     /* set desired logo width */
-            height: auto !important;
-            z-index: 10;                  /* above nav */
-            display: block;
-        }
+    st.markdown(f"""
+    <style>
+    /* Ensure the sidebar is a positioning context */
+    [data-testid="stSidebar"] {{ position: relative; }}
 
-        /* Push the nav/menu down so it starts below the logo */
-        [data-testid="stSidebar"] .block-container {
-            padding-top: 170px !important;  /* tune: ≈ logo height + spacing */
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    /* Insert the logo before all sidebar children, i.e., above st.navigation */
+    [data-testid="stSidebar"]::before {{
+    content: "";
+    display: block;
+    position: relative;
+    height: 120px;                    /* increase to make the logo larger */
+    margin: 10px 16px 6px 16px;       /* top/right/bottom/left */
+    background-image: url("data:image/png;base64,{_logo_b64}");
+    background-repeat: no-repeat;
+    background-size: contain;         /* scales the image */
+    background-position: left top;
+    }}
+
+    /* Push nav/content down so it starts below the inserted logo */
+    [data-testid="stSidebar"] .block-container {{
+    padding-top: 140px !important;    /* ≈ height + margins; tune with the height above */
+    }}
+    </style>
+    """, unsafe_allow_html=True)
+
 
     # Sidebar logo ABOVE navigation; keep your previous sidebar CSS untouched
-    with st.sidebar:
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        st.image("logo_bs.png")  # increase as needed (e.g., 260–300)
-        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    # with st.sidebar:
+    #     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    #     st.image("logo_bs.png")  # increase as needed (e.g., 260–300)
+    #     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
     # Native navigation (no extra styling)
     nav = st.navigation(
