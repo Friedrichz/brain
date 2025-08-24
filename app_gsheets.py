@@ -827,9 +827,8 @@ def _attach_since_report_col(
     return out
 
 
-# ======== REPLACE show_market_view WITH THIS ========
-
-def show_market_view() -> None:
+# === New page: Fund Positions ===
+def show_fund_positions() -> None:
     letters = _load_letters()
     if letters.empty:
         st.warning("Letters table is empty or unavailable.")
@@ -837,12 +836,12 @@ def show_market_view() -> None:
     letters = _parse_report_date(letters, "report_date")
     letters = _map_fund_names(letters, fund_id_col="fund_id")
 
-    # ── Row 1 ─────────────────────────────────────────────────────────────
     top_tabs = st.tabs([
         "Fund Positions",
         "Investment Thesis",
     ])
 
+    # --- Fund Positions tab (same as in show_market_view) ---
     with top_tabs[0]:
         df = letters.copy()
         for col in ["position_ticker","position_weight_percent"]:
@@ -850,7 +849,6 @@ def show_market_view() -> None:
                 df[col] = None
         mask = _nonnull_mask(df["position_ticker"]) & _nonnull_mask(df["position_weight_percent"])
         df = df[mask].copy()
-
         if df.empty:
             st.info("No rows with non-empty position_ticker and position_weight_percent.")
         else:
@@ -858,11 +856,9 @@ def show_market_view() -> None:
             df["report_date"] = pd.to_datetime(df["report_date"], errors="coerce")
             latest = df.groupby("fund_name")["report_date"].transform("max")
             df = df[df["report_date"] == latest].copy()
-
             for col in ["position_name","position_sector"]:
                 if col not in df.columns:
                     df[col] = None
-
             view = df[[
                 "fund_name","position_name","position_ticker","position_sector","position_weight_percent","report_date"
             ]].rename(columns={
@@ -873,17 +869,14 @@ def show_market_view() -> None:
                 "position_weight_percent":"Position Weight (%)",
                 "report_date":"Report Date"
             }).sort_values(["Fund Name","Position Weight (%)"], ascending=[True, False])
-
             metrics = view.rename(columns={"Position Ticker": "position_ticker"})
             metrics = _attach_return_columns(metrics, ticker_col="position_ticker")
             metrics = metrics.rename(columns={"position_ticker": "Position Ticker"})
-
             ordered_cols = [
                 "Fund Name","Position Name","Position Ticker","Position Sector",
                 "Position Weight (%)","Report Date","MTD %","YTD %"
             ]
             metrics = metrics[ordered_cols].sort_values(["MTD %"], ascending=[False])
-
             st.dataframe(
                 metrics,
                 use_container_width=True,
@@ -896,6 +889,7 @@ def show_market_view() -> None:
                 },
             )
 
+    # --- Investment Thesis tab (same as in show_market_view) ---
     with top_tabs[1]:
         df = letters.copy()
         for col in ["position_thesis_summary","position_ticker"]:
@@ -903,12 +897,9 @@ def show_market_view() -> None:
                 df[col] = None
         mask = _nonnull_mask(df["position_thesis_summary"]) & _nonnull_mask(df["position_ticker"])
         df = df[mask].copy()
-
         for col in ["position_name","position_sector","position_duration_view"]:
             if col not in df.columns:
                 df[col] = None
-
-        # Build display view
         view = df[[
             "fund_name","report_date","position_name","position_ticker","position_sector",
             "position_thesis_summary","position_duration_view"
@@ -921,35 +912,19 @@ def show_market_view() -> None:
             "position_thesis_summary":"Position Thesis Summary",
             "position_duration_view":"Position Duration View",
         })
-
-        # Normalize display date and create calc date
         view["Report Date"] = pd.to_datetime(view["Report Date"], errors="coerce")
         metrics = view.rename(columns={"Position Ticker":"position_ticker"}).copy()
         metrics["report_date_dt"] = pd.to_datetime(view["Report Date"], errors="coerce", utc=True).dt.tz_localize(None)
-
-        # Attach only MTD/YTD (per earlier change)
         metrics = _attach_return_columns(metrics, ticker_col="position_ticker")
-
-        # Attach Since Report %
-        metrics = _attach_since_report_col(
-            metrics,
-            ticker_col="position_ticker",
-            report_date_col="report_date_dt",
-            colname="Since Report %",
-        )
-
-        # Restore display names, drop calc helper
+        metrics = _attach_since_report_col(metrics, ticker_col="position_ticker", report_date_col="report_date_dt", colname="Since Report %")
         metrics = metrics.rename(columns={"position_ticker":"Position Ticker"})
         metrics = metrics.drop(columns=["report_date_dt"], errors="ignore")
-
-        # Order and render
         metrics = metrics.sort_values("Report Date", ascending=False)
         ordered_cols = [
             "Fund Name","Report Date","Position Name","Position Ticker","Position Sector",
             "Position Thesis Summary","Since Report %","MTD %","YTD %","Position Duration View",
         ]
         metrics = metrics[ordered_cols]
-
         st.dataframe(
             metrics,
             use_container_width=True,
@@ -961,6 +936,18 @@ def show_market_view() -> None:
                 "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
             },
         )
+
+
+
+# ======== REPLACE show_market_view WITH THIS ========
+
+def show_market_view() -> None:
+    letters = _load_letters()
+    if letters.empty:
+        st.warning("Letters table is empty or unavailable.")
+        return
+    letters = _parse_report_date(letters, "report_date")
+    letters = _map_fund_names(letters, fund_id_col="fund_id")
 
     
     # ── Row 2 ─────────────────────────────────────────────────────────────
@@ -2254,24 +2241,18 @@ def main() -> None:
         """, 
         unsafe_allow_html=True)
 
-    # Sidebar logo ABOVE navigation; keep your previous sidebar CSS untouched
-    # with st.sidebar:
-    #     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    #     st.image("logo_bs.png")  # increase as needed (e.g., 260–300)
-    #     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-
     # Native navigation (no extra styling)
     nav = st.navigation(
         [
             st.Page(show_fund_database, title="Fund Database"),
             st.Page(show_fund_monitor, title="Fund Monitor"),
-            st.Page(show_performance_view, title="Performance Est"),
+            st.Page(show_fund_positions, title="Fund Positions"),
+            st.Page(show_performance_view, title="Performance Estimates"),
             st.Page(show_market_view, title="Market Views"),
             st.Page(show_market_analytics, title="Market Analytics"),
         ]
     )
     nav.run()
-
 
 if __name__ == "__main__":
     main()
