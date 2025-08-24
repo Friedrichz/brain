@@ -994,6 +994,11 @@ def show_market_view() -> None:
                 "macro_view_direction": "Macro View Direction",
             }).sort_values("Report Date", ascending=False)
 
+        # Add search bar for Macro Category
+        search_term = st.text_input("Search Macro Category", "", key="mv_search_macro")
+        if search_term:
+            df = df[df["Macro Category"].astype(str).str.contains(search_term, case=False, na=False)]
+
         st.dataframe(
             df,
             use_container_width=True,
@@ -1751,7 +1756,7 @@ def show_fund_monitor() -> None:
         # Right column: placeholder header for manager notes
         with col_right:
             st.markdown("### Last Manager Update Notes")
-            st.info("Placeholder for latest manager update notes. Connect to notes source and render here.")
+            st.info("Placeholder for latest manager update notes from fireflies.ai notetaker. Connect to notes source and render here.")
 
         st.markdown("---")
 
