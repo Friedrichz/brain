@@ -1693,6 +1693,9 @@ def show_fund_monitor() -> None:
                 except Exception:
                     geo_df = build_exposure_df(row, geo_keys)
                     st.dataframe(_fm_arrow_safe(geo_df), use_container_width=True)
+        
+        st.markdown("---")
+        st.markdown("### Historical Net/Gross")
 
         # net/gross time series (kept here; AUM/returns moved to Overview)
         if {"date", "net", "gross"} <= set(fund_df.columns):
