@@ -2229,29 +2229,29 @@ def main() -> None:
         _logo_b64 = base64.b64encode(_f.read()).decode("ascii")
 
     st.markdown(f"""
-    <style>
-    /* Ensure the sidebar is a positioning context */
-    [data-testid="stSidebar"] {{ position: relative; }}
+        <style>
+        /* Ensure the sidebar is a positioning context */
+        [data-testid="stSidebar"] {{ position: relative; }}
 
-    /* Insert the logo before all sidebar children, i.e., above st.navigation */
-    [data-testid="stSidebar"]::before {{
-    content: "";
-    display: block;
-    position: relative;
-    height: 120px;                    /* increase to make the logo larger */
-    margin: 10px 16px 6px 16px;       /* top/right/bottom/left */
-    background-image: url("data:image/png;base64,{_logo_b64}");
-    background-repeat: no-repeat;
-    background-size: contain;         /* scales the image */
-    background-position: left top;
-    }}
+        /* Insert the logo before all sidebar children, i.e., above st.navigation */
+        [data-testid="stSidebar"]::before {{
+        content: "";
+        display: block;
+        position: relative;
+        height: 90px;                    /* increase to make the logo larger */
+        margin: 10px 16px 16px 16px;       /* top/right/bottom/left */
+        background-image: url("data:image/png;base64,{_logo_b64}");
+        background-repeat: no-repeat;
+        background-size: contain;         /* scales the image */
+        background-position: left top;
+        }}
 
-    /* Push nav/content down so it starts below the inserted logo */
-    [data-testid="stSidebar"] .block-container {{
-    padding-top: 140px !important;    /* ≈ height + margins; tune with the height above */
-    }}
-    </style>
-    """, unsafe_allow_html=True)
+        /* Push nav/content down so it starts below the inserted logo */
+        [data-testid="stSidebar"] .block-container {{
+        padding-top: 140px !important;    /* ≈ height + margins; tune with the height above */
+        }}
+        </style>
+        """, unsafe_allow_html=True)
 
 
     # Sidebar logo ABOVE navigation; keep your previous sidebar CSS untouched
