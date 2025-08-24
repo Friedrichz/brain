@@ -1737,36 +1737,6 @@ def show_fund_monitor() -> None:
             else:
                 st.info("No recent summary available.")
 
-            st.markdown("**Top 10 Positions**")
-            try:
-                letters = _load_letters()
-            except Exception:
-                letters = pd.DataFrame()
-            if letters.empty or not {"fund_id", "report_date", "position_ticker", "position_weight_percent"} <= set(letters.columns):
-                st.info("No positions available.")
-            else:
-                dfp = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
-                dfp["report_date"] = pd.to_datetime(dfp["report_date"], errors="coerce")
-                if dfp.empty or dfp["report_date"].dropna().empty:
-                    st.info("No positions available.")
-                else:
-                    latest_rd = dfp["report_date"].max()
-                    dfp = dfp[dfp["report_date"] == latest_rd].copy()
-                    for c in ["position_name", "position_sector"]:
-                        if c not in dfp.columns:
-                            dfp[c] = None
-                    view = dfp[["position_name", "position_ticker", "position_sector", "position_weight_percent"]].rename(
-                        columns={
-                            "position_name": "Position Name",
-                            "position_ticker": "Position Ticker",
-                            "position_sector": "Position Sector",
-                            "position_weight_percent": "Position Weight (%)",
-                        }
-                    ).copy()
-                    view["Position Weight (%)"] = pd.to_numeric(view["Position Weight (%)"], errors="coerce")
-                    view = view.dropna(subset=["Position Ticker"]).sort_values("Position Weight (%)", ascending=False).head(10)
-                    st.dataframe(_fm_arrow_safe(view), use_container_width=True)
-
         # Right column: placeholder header for manager notes
         with col_right:
             st.markdown("### Last Manager Update Notes")
