@@ -2231,7 +2231,7 @@ def main() -> None:
     # Sidebar logo ABOVE navigation
     with st.sidebar:
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        st.image("logo_bs.png", width=150)  # increase as needed
+        st.sidebar.image("logo_bs.png", width=120)  # increase as needed
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
     # Native navigation (no extra styling)
