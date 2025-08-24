@@ -2183,34 +2183,34 @@ def show_market_analytics():
 def main() -> None:
     st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
 
-    # --- Sidebar styling (target only nav links) ---
+    # Sidebar skin only. Keep default Streamlit theme for content.
     st.markdown(
         """
         <style>
-        [data-testid="stSidebar"] { background-color: #1d2533 !important; }
-        [data-testid="stSidebar"] .block-container { padding-top: 10px; }
+        /* Dark sidebar */
+        [data-testid="stSidebar"]{background:#1d2533!important;}
+        [data-testid="stSidebar"] .block-container{padding-top:10px;}
 
-        /* st.navigation link text in the sidebar (cover multiple build variants) */
+        /* Force white titles in the new st.navigation sidebar */
         [data-testid="stSidebar"] nav a,
         [data-testid="stSidebar"] [role="navigation"] a,
         [data-testid="stSidebar"] [data-testid="stPageLink"],
-        [data-testid="stSidebar"] [role="link"] {
-            color: #ffffff !important;
+        [data-testid="stSidebar"] [role="link"]{
+            color:#ffffff!important; opacity:1!important;
         }
-        [data-testid="stSidebar"] [aria-current="page"] {
-            color: #ffffff !important;
+        [data-testid="stSidebar"] [aria-current="page"]{
+            color:#ffffff!important; opacity:1!important;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # --- Logo above nav (50% larger = 135px). st.logo renders before st.navigation. ---
-    st.logo("logo_bs.png")                  # header + sidebar masthead
-    st.sidebar.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-    st.sidebar.image("logo_bs.png", width=135)  # explicit in sidebar, above nav
+    # Logo in the official masthead (sits ABOVE the sidebar nav). 50% larger -> 135px.
+    st.logo("logo_bs.png", size="large")  # Streamlit renders this before st.navigation
+    st.sidebar.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-    # --- Native navigation (no extra styling elsewhere; default red accents kept) ---
+    # Native navigation (no extra styling)
     nav = st.navigation(
         [
             st.Page(show_fund_database, title="Fund Database"),
