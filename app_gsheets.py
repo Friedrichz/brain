@@ -221,7 +221,7 @@ def show_fund_database() -> None:
     _page_header("Fund Database", [
         "Central repository for all funds invested and prospective.",
         "*Any new fund presentation can be uploaded and will automatically be populated in the table below.*",
-        "Overview tab: get quick look at bench to get info and compare exposures.",
+        "Overview tab: overview of bench to get info and compare key metrics.",
         "Liquidity & Ops tab: read-only view of redemption terms, gates, domicile and admin.",
         "Uploads tab: upload PDF into the configured Drive folder."
     ])
@@ -1354,26 +1354,28 @@ def _fm_aum_to_float(x):
         return float(m[0]) * mult if m else np.nan
 
 def _fm_return_to_float(x):
-    """Robust monthly return parser. Accepts %, decimals, and percentage points."""
+    """Robust monthly return parser. Accepts '%', decimals, and percentage points."""
+    import numpy as np
     if x is None or (isinstance(x, float) and np.isnan(x)):
         return np.nan
     s = str(x).strip()
     if s == "":
         return np.nan
+    # explicit percent strings, e.g. "2.1%"
     if s.endswith("%"):
         try:
             v = float(s[:-1]) / 100.0
         except Exception:
             return np.nan
-        return max(v, -0.99)
+        return max(v, -0.99)  # guard against -100%
+    # numeric strings or numbers
     try:
         f = float(s)
     except Exception:
         return np.nan
-    # Heuristic: values with abs >= 2 and <= 100 look like percentage points -> scale
+    # percentage‑points heuristic: typical monthly numbers like ±2 … ±30 → divide by 100
     if -100.0 <= f <= 100.0 and abs(f) >= 2.0:
         f = f / 100.0
-    # Guardrail against -100% (blows up cumprod)
     return max(f, -0.99)
 
 def _fm_percent_to_float(val):
@@ -1652,18 +1654,31 @@ def show_fund_monitor() -> None:
         with hc1:
             st.subheader("Cumulative Performance")
             track_record = fetch_track_record_json(selected_canonical_id)
+
+            # normalize common shapes:
+            # - {"returns":[{"date":..., "return":...}, ...]}
+            # - [{"track_label":..., "data":[...], "meta":{...}}]
+            if isinstance(track_record, list) and track_record:
+                # list wrapper → take first element
+                track_record = track_record[0] if isinstance(track_record[0], dict) else None
+            if isinstance(track_record, dict) and "data" in track_record and isinstance(track_record["data"], list):
+                track_record = {"returns": track_record["data"]}
+
             if track_record and isinstance(track_record.get("returns"), list):
                 r = pd.DataFrame(track_record["returns"]).copy()
-                # normalize columns
+
+                # column normalization
                 if "date" not in r.columns or "return" not in r.columns:
                     if {"date", "ret"} <= set(r.columns):
                         r = r.rename(columns={"ret": "return"})
                     elif {"date", "value"} <= set(r.columns):
                         r = r.rename(columns={"value": "return"})
+
                 if {"date", "return"} <= set(r.columns):
                     r["date"] = pd.to_datetime(r["date"], errors="coerce")
                     r["return"] = r["return"].apply(_fm_return_to_float)
                     r = r.dropna(subset=["date", "return"]).sort_values("date")
+
                     if not r.empty:
                         r["cum"] = (1.0 + r["return"]).cumprod() - 1.0
                         ch = (
@@ -1672,7 +1687,10 @@ def show_fund_monitor() -> None:
                             .encode(
                                 x=alt.X("date:T", title="Date"),
                                 y=alt.Y("cum:Q", title="Cumulative Return", axis=alt.Axis(format="~%")),
-                                tooltip=[alt.Tooltip("date:T"), alt.Tooltip("cum:Q", title="Cumulative", format=".2%")],
+                                tooltip=[
+                                    alt.Tooltip("date:T"),
+                                    alt.Tooltip("cum:Q", title="Cumulative", format=".2%")
+                                ],
                             )
                             .properties(height=350)
                         )
