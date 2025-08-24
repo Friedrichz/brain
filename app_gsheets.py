@@ -1720,10 +1720,8 @@ def show_fund_monitor() -> None:
     # Tab 3: Manager Updates
     # --------------------------------
     with tabs[2]:
-        st.subheader("Manager Updates")
         col_left, col_right = st.columns([3, 2])
 
-        # Left column: Last Summary & Positions  (moved from Exposures)
         with col_left:
             st.markdown("### Latest Summary")
             bullets, repdate = [], None
@@ -1752,6 +1750,84 @@ def show_fund_monitor() -> None:
             st.markdown("### Last Manager Update Notes")
             st.info("Placeholder for latest manager update notes. Connect to notes source and render here.")
 
+        st.markdown("---")
+
+        # Investment Thesis table for the selected fund (same schema as Fund Positions > Investment Thesis)
+        try:
+            letters = _load_letters()
+        except Exception:
+            letters = pd.DataFrame()
+
+        if letters.empty:
+            st.info("Letters table is empty or unavailable.")
+        else:
+            letters = _parse_report_date(letters, "report_date")
+            letters = _map_fund_names(letters, fund_id_col="fund_id")
+            # filter to the selected fund only
+            df = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
+
+            # keep rows with thesis + ticker
+            for col in ["position_thesis_summary", "position_ticker"]:
+                if col not in df.columns:
+                    df[col] = None
+            mask = _nonnull_mask(df["position_thesis_summary"]) & _nonnull_mask(df["position_ticker"])
+            df = df[mask].copy()
+
+            # ensure optional columns exist
+            for col in ["position_name", "position_sector", "position_duration_view"]:
+                if col not in df.columns:
+                    df[col] = None
+
+            view = df[[
+                "fund_name","report_date","position_name","position_ticker","position_sector",
+                "position_thesis_summary","position_duration_view"
+            ]].rename(columns={
+                "fund_name":"Fund Name",
+                "report_date":"Report Date",
+                "position_name":"Position Name",
+                "position_ticker":"Position Ticker",
+                "position_sector":"Position Sector",
+                "position_thesis_summary":"Position Thesis Summary",
+                "position_duration_view":"Position Duration View",
+            })
+
+            view["Report Date"] = pd.to_datetime(view["Report Date"], errors="coerce")
+
+            metrics = view.rename(columns={"Position Ticker":"position_ticker"}).copy()
+            metrics["report_date_dt"] = pd.to_datetime(view["Report Date"], errors="coerce", utc=True).dt.tz_localize(None)
+            metrics = _attach_return_columns(metrics, ticker_col="position_ticker")
+            metrics = _attach_since_report_col(
+                metrics,
+                ticker_col="position_ticker",
+                report_date_col="report_date_dt",
+                colname="Since Report %"
+            )
+            metrics = metrics.rename(columns={"position_ticker":"Position Ticker"})
+            metrics = metrics.drop(columns=["report_date_dt"], errors="ignore")
+            metrics = metrics.sort_values("Report Date", ascending=False)
+
+            ordered_cols = [
+                "Report Date","Position Name","Position Ticker","Position Sector",
+                "Position Thesis Summary","Since Report %","MTD %","YTD %","Position Duration View",
+            ]
+            metrics = metrics[ordered_cols]
+
+            st.markdown("### Investment Thesis")
+            st.dataframe(
+                metrics,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Report Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD", step="day"),
+                    "Since Report %": st.column_config.NumberColumn(format="%.2f%%"),
+                    "MTD %": st.column_config.NumberColumn(format="%.2f%%"),
+                    "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
+                },
+            )
+
+        st.markdown("---")
+        st.markdown("### Suggested Questions for next Meeting:")
+        st.info("Placeholder for suggested questions based on latest fund communications.")
     # --------------------------------
     # Tab 4: Quant
     # --------------------------------
