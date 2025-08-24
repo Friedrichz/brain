@@ -2251,8 +2251,8 @@ def main() -> None:
         padding-top: 140px !important;    /* ≈ height + margins; tune with the height above */
         }}
         </style>
-        """, unsafe_allow_html=True)
-
+        """, 
+        unsafe_allow_html=True)
 
     # Sidebar logo ABOVE navigation; keep your previous sidebar CSS untouched
     # with st.sidebar:
