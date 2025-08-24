@@ -2224,38 +2224,17 @@ def main() -> None:
     )
 
     # replace your current "logo" <style> block with this
-    st.markdown(
-        """
-        <style>
-        /* Increase header height so a larger logo is actually visible */
-        [data-testid="stHeader"] {
-            height: 190px !important;           /* was ~60–80px */
-            min-height: 190px !important;
-        }
-        [data-testid="stHeader"] > div {
-            height: 190px !important;
-            min-height: 190px !important;
-        }
+    # 1) Hide the default masthead logo (keep your other CSS as-is)
+    st.markdown("""
+    <style>
+    [data-testid="stLogo"] { display: none !important; }  /* hide header logo */
+    </style>
+    """, unsafe_allow_html=True)
 
-        /* Enlarge the logo itself */
-        [data-testid="stLogo"],
-        [data-testid="stLogo"] img {
-            height: 300px !important;           /* > 2× default ~135px */
-            max-height: 300px !important;
-            width: auto !important;
-        }
-
-        /* Fallback: force 2× scale even if upstream size rules change */
-        [data-testid="stLogo"] { transform: scale(2); transform-origin: top left; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # keep your existing call
-    st.logo("logo_bs.png", size="large")
-
+    # 2) Sidebar logo block ABOVE st.navigation
     st.sidebar.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    st.sidebar.image("logo_bs.png", width=200)  # ≈2× larger; adjust as needed
+    st.sidebar.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
     # Native navigation (no extra styling)
     nav = st.navigation(
