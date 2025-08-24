@@ -2180,59 +2180,27 @@ def show_market_analytics():
 
 
 # ---- Main ----
-
-# app_gsheets.py
-
-import base64
+import base64  # keep near the top with other imports
 
 def main() -> None:
     st.set_page_config(page_title="Fund Monitoring Dashboard", layout="wide")
 
-    # ---------- Minimal CSS: sidebar only ----------
+    # Sidebar background only (dark blue) + logo spacing; no other theming
     st.markdown(
         """
         <style>
-        /* Sidebar background */
         [data-testid="stSidebar"] { background-color: #1d2533 !important; }
-        [data-testid="stSidebar"] .block-container { background: transparent !important; padding-top: 8px; }
-
-        /* Logo: 50% smaller + more gap below */
+        [data-testid="stSidebar"] .block-container { padding-top: 8px; }
         .sidebar-logo { text-align:center; padding: 12px 0 40px 0; }
-        .sidebar-logo img { width: 90px; height: auto; }  /* ~half of the previous 180px */
-
-        /* Custom text-only nav (buttons styled as links) */
-        [data-testid="stSidebar"] .stButton>button {
-            width: 100%;
-            text-align: left;
-            background: transparent !important;
-            color: #ffffff !important;
-            border: none !important;
-            box-shadow: none !important;
-            padding: 8px 4px;
-            margin: 2px 0;
-        }
-        [data-testid="stSidebar"] .stButton>button:hover {
-            background: rgba(255,255,255,0.06) !important;
-        }
-        [data-testid="stSidebar"] .stButton>button:focus { outline: none !important; box-shadow: none !important; }
-
-        /* Selected item = bold white text, no icons/arrows, no background */
-        .nav-item-selected {
-            color: #ffffff !important;
-            font-weight: 700;
-            padding: 8px 4px;
-            margin: 2px 0;
-            border-left: 3px solid #ffffff33;
-        }
+        .sidebar-logo img { width: 90px; height: auto; } /* smaller logo */
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # ---------- Sidebar: logo ----------
+    # Sidebar logo
     try:
-        logo_path = "logo_bs.png"
-        with open(logo_path, "rb") as f:
+        with open("logo_bs.png", "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
         st.sidebar.markdown(
             f'<div class="sidebar-logo"><img src="data:image/png;base64,{b64}" alt="logo"></div>',
@@ -2241,53 +2209,18 @@ def main() -> None:
     except Exception:
         pass
 
-    # ---------- Sidebar: custom text menu (no arrows, no icons, no white card) ----------
-    PAGES = ["Fund Database", "Fund Monitor", "Performance Est", "Market Views", "Market Analytics"]
-    if "page" not in st.session_state:
-        st.session_state["page"] = PAGES[0]
+    # Native Streamlit navigation (clean sidebar, no arrows/icons)
+    nav = st.navigation(
+        [
+            st.Page(show_fund_database, title="Fund Database"),
+            st.Page(show_fund_monitor, title="Fund Monitor"),
+            st.Page(show_performance_view, title="Performance Est"),
+            st.Page(show_market_view, title="Market Views"),
+            st.Page(show_market_analytics, title="Market Analytics"),
+        ]
+    )
+    nav.run()
 
-    for name in PAGES:
-        if name == st.session_state["page"]:
-            st.sidebar.markdown(f'<div class="nav-item-selected">{name}</div>', unsafe_allow_html=True)
-        else:
-            if st.sidebar.button(name, key=f"nav_{name}"):
-                st.session_state["page"] = name
-
-    page = st.session_state["page"]
-
-    # ---------- Right-hand content: default Streamlit theme (red accents) ----------
-    # No global color overrides here. All previous blue overrides are removed.
-
-    # ---------- Router (unchanged content) ----------
-    if page == "Fund Database":
-        st.header("Fund Database")
-        show_fund_database()
-
-    elif page == "Performance Est":
-        st.header("Performance Estimates")
-        st.write("Performance estimates are sent by hedge funds to investment.coverage@brightside-capital.com.")
-        st.write("Automation and data extraction from emails happens via n8n and ChatGPT API.")
-        st.write("Data stored in a cloud drive and pulled in below.")
-        show_performance_view()
-
-    elif page == "Market Views":
-        st.write("## Fund Positions and Investment Thesis")
-        st.write("Latest manager portfolio positions are extracted from fund letters, factsheets using LLMs and investment thesis performance are tracked.")
-        st.write("Automatic PDF extraction when files are received via n8n workflowand ChatGPT API.")
-        st.write("Data stored in a cloud drive and pulled in/transformed below.")
-        show_market_view()
-
-    elif page == "Fund Monitor":
-        st.header("Fund Monitor")
-        st.write("Fund data received via email attachments (pdf) are stored in a cloud drive.")
-        st.write("Exposures, historical returns and other metrics are extracted using the ChatGPT API inside the n8n workflow.")
-        st.write("Data stored in a cloud drive and pulled in/transformed below.")
-        show_fund_monitor()
-
-    elif page == "Market Analytics":
-        st.header("Market Analytics")
-        st.write("The idea here is to build a collection of market signals and indicators that provide the AI model with current market context i.e. what is going on? in order to connext the dots.")
-        show_market_analytics()
 
 
 if __name__ == "__main__":
