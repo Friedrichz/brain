@@ -47,6 +47,11 @@ except Exception:  # pandas build without exposed Styler path
     Styler = Any  # type: ignore
 
 
+def _page_header(title: str, bullets: list[str]) -> None:
+    st.header(title)
+    if bullets:
+        st.markdown("\n".join(f"- {b}" for b in bullets))
+
 # --- Drive scopes / helpers (existing) ---
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 
@@ -210,6 +215,14 @@ def show_fund_database() -> None:
     import pandas as pd
     import streamlit as st
     from st_aggrid import AgGrid, GridOptionsBuilder
+
+    _page_header("Fund Database", [
+        "Central repository for all funds invested and prospective. Filter the master list by Brightside Macro, Status, Asset Class, and Fund Name.",
+        "Any new fund presentation can be uploaded and will automatically be populated in the table below",
+        "Overview tab: inline grid to review key fund fields.",
+        "Liquidity & Ops tab: read-only view of redemption terms, gates, domicile and admin.",
+        "Uploads tab: upload PDF into the configured Drive folder."
+    ])
 
     tabs = st.tabs(["Overview", "Liquidity & Ops", "Uploads"])
 
@@ -843,6 +856,13 @@ def _attach_since_report_col(
 
 # === New page: Fund Positions ===
 def show_fund_positions() -> None:
+
+    _page_header("Fund Positions & Thesis", [
+        "Track fund portfolios for outliers and source new investment ideas automatically extracted from factsheets/letters"
+        "Fund Positions: latest reported positions per fund with weights and MTD/YTD metrics.",
+        "Investment Thesis: per-position thesis, sector, duration view, and Since-Report returns."
+    ])
+
     letters = _load_letters()
     if letters.empty:
         st.warning("Letters table is empty or unavailable.")
@@ -965,8 +985,12 @@ def show_market_view() -> None:
 
     
     # ── Row 2 ─────────────────────────────────────────────────────────────
-    st.write("## Market Views")
-    st.write("Latest manager insights extracted from fund letters, factsheets and external research communications")
+
+    _page_header("Market Views", [
+        "Latest manager insights extracted from fund letters, factsheets and external research communications",
+        "Fund Insights: manager macro views with a search bar on Macro Category. Search for e.g. 'AI' or 'USD'",
+        "External Research: filter third‑party notes and open full details in the inspector."
+    ])
 
     bottom_tabs = st.tabs([
         "Fund Insights",
@@ -1377,6 +1401,13 @@ def _fm_scorecard(label: str, value: str, *, big: bool = False, multiline: bool 
 
 # ---------- public entry: call this from main router ----------
 def show_fund_monitor() -> None:
+    _page_header("Fund Monitor", [
+        "Select a fund and review profile, obtain latest exposures, letter summary,  call notes and review their position theses",
+        "Portfolio Exposures: latest top positions and sector/geo exposure tables plus net/gross history.",
+        "Manager Updates: most recent letter bullets and thesis table with Since-Report, MTD, and YTD.",
+        "Quant and Newsflow: placeholders ready for analytics and feed integration."
+    ])
+
     # ========= Data loads =========
     if not ("exposures" in st.secrets and "sheet_id" in st.secrets["exposures"]):
         st.error("Missing 'exposures' configuration in secrets.")
@@ -1815,7 +1846,7 @@ def show_fund_monitor() -> None:
             metrics = metrics.sort_values("Report Date", ascending=False)
 
             ordered_cols = [
-                "Report Date","Position Name","Position Ticker","Position Sector",
+                "Position Name","Position Sector",
                 "Position Thesis Summary","Since Report %","MTD %","YTD %","Position Duration View",
             ]
             metrics = metrics[ordered_cols]
@@ -1826,7 +1857,7 @@ def show_fund_monitor() -> None:
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    "Report Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD", step="day"),
+                    # "Report Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD", step="day"),
                     "Since Report %": st.column_config.NumberColumn(format="%.2f%%"),
                     "MTD %": st.column_config.NumberColumn(format="%.2f%%"),
                     "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
@@ -2272,6 +2303,13 @@ def view_market_stress():
 # Router for Market Analytics
 # Replace the whole function
 def show_market_analytics():
+    _page_header("Market Analytics", [
+        "This section will feature market analytics, statistics etc. to feed the AI brain with context on the market so as to improve the reasoning",
+        "Market Memory Explorer: compare current YTD path to similar historical years.",
+        "Monthly Seasonality Explorer: median, range, and hit‑rate by calendar month.",
+        "Controls persist across both views for a single chosen ticker."
+    ])
+
     # Shared controls for BOTH views
     c1, c2, c3 = st.columns([2,1,1])
     with c1:
