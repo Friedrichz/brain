@@ -866,7 +866,7 @@ def show_fund_positions() -> None:
     _page_header("Fund Positions & Thesis", [
         "Track fund portfolios for outliers and source new investment ideas automatically extracted from factsheets/letters"
         "Fund Positions: latest reported positions per fund with weights and MTD/YTD metrics.",
-        "Investment Thesis: per-position thesis, sector, duration view, and Since-Report returns."
+        "Investment Thesis: per-position thesis, sector, duration view, and Since-Report returns & visualize price since mention."
     ])
 
     letters = _load_letters()
@@ -976,6 +976,9 @@ def show_fund_positions() -> None:
                 "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
             },
         )
+
+    st.markdown("---")
+    st.markdown("### Price chart for any ticker above since mention")
     # --- Ticker chart: 1-year window prior to report date, with report-date marker ---
     avail_tickers = (
         metrics["Position Ticker"]
