@@ -51,6 +51,7 @@ def _page_header(title: str, bullets: list[str]) -> None:
     st.header(title)
     if bullets:
         st.markdown("\n".join(f"- {b}" for b in bullets))
+    st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
     return
 
 # --- Drive scopes / helpers (existing) ---
@@ -975,11 +976,68 @@ def show_fund_positions() -> None:
                 "YTD %": st.column_config.NumberColumn(format="%.2f%%"),
             },
         )
+    # --- Ticker chart: 1-year window prior to report date, with report-date marker ---
+    avail_tickers = (
+        metrics["Position Ticker"]
+        .dropna()
+        .astype(str)
+        .str.upper()
+        .unique()
+        .tolist()
+    )
+
+    if avail_tickers:
+        sel = st.selectbox(
+            "Chart a ticker from the table",
+            sorted(avail_tickers),
+            key="it_chart_ticker",
+        )
+
+        # Latest report date for the selected ticker
+        md = metrics[metrics["Position Ticker"].str.upper() == sel].copy()
+        md["Report Date"] = pd.to_datetime(md["Report Date"], errors="coerce")
+        rd = md["Report Date"].max()
+
+        if pd.notna(rd):
+            start = rd - pd.Timedelta(days=365)
+            # Lookback = days since start; add small buffer
+            lookback = int((pd.Timestamp.today().normalize() - start).days) + 5
+
+            px = _yahoo_history_panel([sel], lookback_days=lookback)
+            if not px.empty:
+                px = px[px["ticker"] == sel].copy()
+                px = px[px["date"] >= start]
+
+                import altair as alt
+                line = (
+                    alt.Chart(px)
+                    .mark_line()
+                    .encode(
+                        x=alt.X("date:T", title="Date"),
+                        y=alt.Y("adj_close:Q", title=f"{sel} adjusted close"),
+                        tooltip=[
+                            alt.Tooltip("date:T"),
+                            alt.Tooltip("adj_close:Q", title="Adj Close", format=",.2f"),
+                        ],
+                    )
+                    .properties(height=350)
+                )
+
+                vline = alt.Chart(pd.DataFrame({"date": [rd]})).mark_rule(strokeDash=[4, 4]).encode(
+                    x="date:T"
+                )
+
+                st.altair_chart(line + vline, use_container_width=True)
+                st.caption(
+                    f"Window: {start.date()} → {pd.Timestamp.today().date()}   |   Report date: {rd.date()}"
+                )
+            else:
+                st.info("No price history available for the selected ticker.")
+
 
 
 
 # ======== REPLACE show_market_view WITH THIS ========
-
 def show_market_view() -> None:
     letters = _load_letters()
     if letters.empty:
@@ -995,11 +1053,13 @@ def show_market_view() -> None:
         "Latest manager insights extracted from fund letters, factsheets and external research communications",
         "Fund Insights: manager macro views with a search bar on Macro Category. Search for e.g. 'AI' or 'USD'",
         "External Research: filter third‑party notes and open full details in the inspector."
+        "Ask: Ask an LLM to collect insights on a specific topic from managers/research in our universe (TBD)."
     ])
 
     bottom_tabs = st.tabs([
         "Fund Insights",
-        "External Research"
+        "External Research",
+        "Ask"
     ])
 
     with bottom_tabs[0]:
@@ -1105,7 +1165,14 @@ def show_market_view() -> None:
                         st.markdown(f"**{col}:**")
                         value = full_row[col] if col in full_row else row.get(col)
                         st.markdown(value if pd.notna(value) else "_(empty)_")
-
+    with bottom_tabs[2]:
+        st.info("Ask functionality is coming.")
+        # Placeholder for future implementation
+        prompt = st.text_input("Enter your question about markets", key="ask_prompt")
+        # if prompt:
+        #     with st.spinner("Generating answer..."):
+        #         answer = generate_answer(prompt, letters)
+        #     st.markdown(f"**Answer:** {answer}")
 
 # --- Shared utilities (existing + minor helpers) ---
 def parse_any_date(val):
