@@ -2226,15 +2226,22 @@ def main() -> None:
     st.markdown(
         """
         <style>
-        /* Enlarge the masthead logo */
+        /* Target the logo in the app header (added via st.logo) */
+        [data-testid="stLogo"] {
+            max-height: 270px !important;  /* double the default ~135px */
+            height: 270px !important;
+            width: auto !important;
+        }
         [data-testid="stLogo"] img {
-            max-height: 270px !important; /* 135px × 2 */
+            max-height: 270px !important;
+            height: 270px !important;
             width: auto !important;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
+
 
 
     # Logo in the official masthead (sits ABOVE the sidebar nav). 50% larger -> 135px.
