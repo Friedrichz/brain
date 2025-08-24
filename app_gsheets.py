@@ -219,9 +219,9 @@ def show_fund_database() -> None:
     from st_aggrid import AgGrid, GridOptionsBuilder
 
     _page_header("Fund Database", [
-        "Central repository for all funds invested and prospective. Filter the master list by Brightside Macro, Status, Asset Class, and Fund Name.",
-        "Any new fund presentation can be uploaded and will automatically be populated in the table below",
-        "Overview tab: inline grid to review key fund fields.",
+        "Central repository for all funds invested and prospective.",
+        "*Any new fund presentation can be uploaded and will automatically be populated in the table below.*",
+        "Overview tab: get quick look at bench to get info and compare exposures.",
         "Liquidity & Ops tab: read-only view of redemption terms, gates, domicile and admin.",
         "Uploads tab: upload PDF into the configured Drive folder."
     ])
