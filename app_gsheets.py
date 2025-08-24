@@ -2185,31 +2185,44 @@ def main() -> None:
 
     # Sidebar skin only. Keep default Streamlit theme for content.
     st.markdown(
-    """
-    <style>
-    /* Dark sidebar */
-    [data-testid="stSidebar"]{background:#1d2533!important;}
-    [data-testid="stSidebar"] .block-container{padding-top:10px;}
+        """
+        <style>
+        /* Dark-only sidebar; leave the rest of the app on light theme */
+        [data-testid="stSidebar"] {
+            background: #111827 !important; /* slate-900 */
+        }
 
-    /* Force white titles in the st.navigation sidebar */
-    [data-testid="stSidebar"] nav a,
-    [data-testid="stSidebar"] [role="navigation"] a,
-    [data-testid="stSidebar"] [data-testid="stPageLink"],
-    [data-testid="stSidebar"] [role="link"],
-    [data-testid="stSidebar"] [role="listitem"] div {
-        color:#ffffff!important;
-        opacity:1!important;
-    }
+        /* Force white nav/page titles and remove dimming */
+        [data-testid="stSidebar"] nav a,
+        [data-testid="stSidebar"] [role="navigation"] a,
+        [data-testid="stSidebar"] [data-testid="stPageLink"],
+        [data-testid="stSidebar"] [role="listitem"] a,
+        [data-testid="stSidebar"] [role="tablist"] button,
+        [data-testid="stSidebar"] [aria-current="page"] {
+            color: #ffffff !important;
+            opacity: 1 !important;
+            text-decoration: none !important;
+        }
 
-    /* Active/selected link */
-    [data-testid="stSidebar"] [aria-current="page"]{
-        color:#ffffff!important;
-        opacity:1!important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
+        /* Ensure any text in the sidebar stays white (covers st.navigation internals) */
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] span,
+        [data-testid="stSidebar"] div {
+            color: #ffffff !important;
+            opacity: 1 !important;
+        }
+
+        /* Make nav icons white as well */
+        [data-testid="stSidebar"] svg,
+        [data-testid="stSidebar"] svg * {
+            fill: #ffffff !important;
+            stroke: #ffffff !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
+
 
     # Logo in the official masthead (sits ABOVE the sidebar nav). 50% larger -> 135px.
     st.logo("logo_bs.png", size="large")  # Streamlit renders this before st.navigation
