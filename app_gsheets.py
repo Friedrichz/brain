@@ -242,7 +242,7 @@ def show_fund_database() -> None:
             df = pd.DataFrame()
 
         # AFTER   (Overview)
-        f1, f2, f3, f4, f5 = st.columns(5)
+        f1, f2, f3, f4 = st.columns(4)
         with f1:
             macro_vals = sorted(df["Brightside Macro"].dropna().unique().tolist()) if "Brightside Macro" in df.columns else []
             sel_macro = st.multiselect("Brightside Macro", macro_vals, default=[], key="fd_ov_macro")
@@ -255,38 +255,7 @@ def show_fund_database() -> None:
         with f4:
             fund_vals = sorted(df["Fund Name"].dropna().unique().tolist()) if "Fund Name" in df.columns else []
             sel_funds = st.multiselect("Fund Name", fund_vals, default=[], key="fd_ov_funds")
-        with f5:
-            # --- refresh button ---
-            refresh_clicked = st.markdown(
-                """
-                <style>
-                .refresh-btn {
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    gap: 6px;
-                    background-color: white;
-                    border: 2px solid #dc2626; /* red-600 */
-                    color: #dc2626;
-                    font-weight: 600;
-                    padding: 6px 12px;
-                    border-radius: 6px;
-                    cursor: pointer;
-                }
-                .refresh-btn:hover {
-                    background-color: #fee2e2; /* red-100 hover */
-                }
-                </style>
-                <form action="" method="get">
-                    <button class="refresh-btn" type="submit" name="fd_refresh" value="1">
-                        &#x21bb;
-                    </button>
-                </form>
-                """,
-                unsafe_allow_html=True
-            )
-            if st.query_params.get("fd_refresh") == "1":
-                st.cache_data.clear()
+    
 
         filtered = df.copy()
         if sel_macro and "Brightside Macro" in filtered.columns:
@@ -333,6 +302,38 @@ def show_fund_database() -> None:
             key="fd_ov_grid",
         )
         edited_df = pd.DataFrame(grid["data"])
+
+        # --- refresh button ---
+        refresh_clicked = st.markdown(
+            """
+            <style>
+            .refresh-btn {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+                background-color: white;
+                border: 2px solid #dc2626; /* red-600 */
+                color: #dc2626;
+                font-weight: 600;
+                padding: 6px 12px;
+                border-radius: 6px;
+                cursor: pointer;
+            }
+            .refresh-btn:hover {
+                background-color: #fee2e2; /* red-100 hover */
+            }
+            </style>
+            <form action="" method="get">
+                <button class="refresh-btn" type="submit" name="fd_refresh" value="1">
+                    &#x21bb;
+                </button>
+            </form>
+            """,
+            unsafe_allow_html=True
+        )
+        if st.query_params.get("fd_refresh") == "1":
+            st.cache_data.clear()
 
         # if do_save:
         #     def _normalize(cell):
