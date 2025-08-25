@@ -515,14 +515,14 @@ def show_performance_view() -> None:
     col1, col2 = st.columns(2)
     asset_classes = sorted(df["asset_class"].dropna().unique().tolist())
     with col1:
-        selected_asset_classes = st.multiselect("Filter by Asset Class", asset_classes, default=[])
-    if selected_asset_classes:
-        df = df[df["asset_class"].isin(selected_asset_classes)]
-    with col2:
         fund_options = ["All"] + sorted(df["Fund Name"].dropna().unique().tolist()) if "Fund Name" in df.columns else []
         fund_choice = st.selectbox("Select Fund", fund_options) if fund_options else "All"
     if fund_choice != "All":
         df = df[df["Fund Name"] == fund_choice]
+    with col2:
+        selected_asset_classes = st.multiselect("Filter by Asset Class", asset_classes, default=[])
+    if selected_asset_classes:
+        df = df[df["asset_class"].isin(selected_asset_classes)]
 
     cols_to_hide = [
         "fund_id","currency","WTD","YTD","Sender","Category","Currency","Net","Gross",
@@ -546,7 +546,11 @@ def show_performance_view() -> None:
         df_display["MTD"] = df_display["MTD"].astype(str).fillna("")
     if "Received" in df_display.columns:
         df_display["Received"] = pd.to_datetime(df_display["Received"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
-    st.dataframe(df_display, use_container_width=True, hide_index=True)
+    st.dataframe(
+        df_display.sort_values("Received", ascending=False),
+        use_container_width=True,
+        hide_index=True
+    )
 
 
 # ======== NEW HELPERS FOR "MARKET VIEWS" ========
