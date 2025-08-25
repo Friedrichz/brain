@@ -1528,6 +1528,7 @@ def show_fund_monitor() -> None:
         return
     exp_sheet_id = st.secrets["exposures"]["sheet_id"]
     exp_ws = st.secrets["exposures"].get("worksheet", "Sheet1")
+
     df = load_sheet(exp_sheet_id, exp_ws)
     if df.empty:
         st.warning("No data returned from the exposures sheet.")
@@ -1536,6 +1537,7 @@ def show_fund_monitor() -> None:
     if not ("securities_master" in st.secrets and "sheet_id" in st.secrets["securities_master"]):
         st.error("Missing 'securities_master' configuration in secrets.")
         return
+    
     sec_sheet_id = st.secrets["securities_master"]["sheet_id"]
     sec_ws = st.secrets["securities_master"].get("worksheet", "Sheet1")
     sec_df = load_sheet(sec_sheet_id, sec_ws)
@@ -1545,14 +1547,16 @@ def show_fund_monitor() -> None:
 
     # ========= Fund select =========
     exposure_fund_ids = set(df["fund_id"].dropna().astype(str).unique()) if "fund_id" in df.columns else set()
+    
     canonical_funds = (
-        sec_df[["canonical_id", "canonical_name"]]
+    sec_df[["canonical_id", "canonical_name"]]
         .drop_duplicates()
         .sort_values("canonical_name")
     )
-    if canonical_funds.empty:
-        st.warning("No matching funds between exposures and securities_master.")
-        return
+    # drop rows with blank or NaN canonical_name
+    canonical_funds = canonical_funds[
+        canonical_funds["canonical_name"].astype(str).str.strip().ne("")
+    ]
 
     default_fund = st.secrets.get("defaults", {}).get("fund", None)
     fund_options = canonical_funds["canonical_name"].tolist()
@@ -1560,7 +1564,11 @@ def show_fund_monitor() -> None:
 
     csel1, _ = st.columns([2, 1])
     with csel1:
-        fund_choice = st.selectbox("Select Fund", fund_options, index=fund_index, key="fm_fund_select")
+        fund_choice = st.selectbox(
+            "Select Fund", fund_options, index=fund_index, key="fm_fund_select"
+        )
+        
+    # Selected canonical ID
     selected_canonical_id = canonical_funds.loc[
         canonical_funds["canonical_name"] == fund_choice, "canonical_id"
     ].iloc[0]
@@ -1568,7 +1576,9 @@ def show_fund_monitor() -> None:
     # ========= Fund slice =========
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"], errors="coerce")
+
     fund_df = df[df.get("fund_id", pd.Series(dtype=str)).astype(str) == str(selected_canonical_id)].copy()
+
     if fund_df.empty:
         st.warning("No exposures found for the selected fund. Showing profile and manager updates from other sources.")
         # fall through; tabs will handle the empty exposures case
@@ -1801,7 +1811,7 @@ def show_fund_monitor() -> None:
             else:
                 c1, c2 = st.columns([2, 1])
                 with c1:
-                    
+
                     date_choice = st.selectbox("Select Date", dates, key="fm_date_select")
                 with c2:
                     file_types = fund_df["file_type"].dropna().unique().tolist() if "file_type" in fund_df.columns else []
