@@ -1546,7 +1546,7 @@ def show_fund_monitor() -> None:
     # ========= Fund select =========
     exposure_fund_ids = set(df["fund_id"].dropna().astype(str).unique()) if "fund_id" in df.columns else set()
     canonical_funds = (
-        sec_df[sec_df["canonical_id"].astype(str)][["canonical_id", "canonical_name"]]
+        sec_df[["canonical_id", "canonical_name"]]
         .drop_duplicates()
         .sort_values("canonical_name")
     )
