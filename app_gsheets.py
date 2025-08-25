@@ -257,8 +257,36 @@ def show_fund_database() -> None:
             sel_funds = st.multiselect("Fund Name", fund_vals, default=[], key="fd_ov_funds")
         with f5:
             # --- refresh button ---
-            if st.button("Refresh table", type="primary", key="fd_refresh"):
-                st.cache_data.clear()  # clears any cached Google Sheet loads
+            refresh_clicked = st.markdown(
+                """
+                <style>
+                .refresh-btn {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 6px;
+                    background-color: white;
+                    border: 2px solid #dc2626; /* red-600 */
+                    color: #dc2626;
+                    font-weight: 600;
+                    padding: 6px 12px;
+                    border-radius: 6px;
+                    cursor: pointer;
+                }
+                .refresh-btn:hover {
+                    background-color: #fee2e2; /* red-100 hover */
+                }
+                </style>
+                <form action="" method="get">
+                    <button class="refresh-btn" type="submit" name="fd_refresh" value="1">
+                        &#x21bb;
+                    </button>
+                </form>
+                """,
+                unsafe_allow_html=True
+            )
+            if st.query_params.get("fd_refresh") == "1":
+                st.cache_data.clear()
 
         filtered = df.copy()
         if sel_macro and "Brightside Macro" in filtered.columns:
