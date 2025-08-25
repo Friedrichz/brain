@@ -1801,6 +1801,7 @@ def show_fund_monitor() -> None:
             else:
                 c1, c2 = st.columns([2, 1])
                 with c1:
+                    
                     date_choice = st.selectbox("Select Date", dates, key="fm_date_select")
                 with c2:
                     file_types = fund_df["file_type"].dropna().unique().tolist() if "file_type" in fund_df.columns else []
