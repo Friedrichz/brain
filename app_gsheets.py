@@ -1519,7 +1519,8 @@ def show_fund_monitor() -> None:
         "Select a fund and review profile, obtain latest exposures, letter summary,  call notes and review their position theses",
         "Portfolio Exposures: latest top positions and sector/geo exposure tables plus net/gross history.",
         "Manager Updates: most recent letter bullets and thesis table with Since-Report, MTD, and YTD.",
-        "Quant and Newsflow: placeholders ready for analytics and feed integration."
+        "Quant and Newsflow: placeholders ready for analytics and feed integration.",
+        "test"
     ])
 
     # ========= Data loads =========
@@ -1567,7 +1568,7 @@ def show_fund_monitor() -> None:
         fund_choice = st.selectbox(
             "Select Fund", fund_options, index=fund_index, key="fm_fund_select"
         )
-        
+
     # Selected canonical ID
     selected_canonical_id = canonical_funds.loc[
         canonical_funds["canonical_name"] == fund_choice, "canonical_id"
