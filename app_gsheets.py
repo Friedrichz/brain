@@ -1519,8 +1519,7 @@ def show_fund_monitor() -> None:
         "Select a fund and review profile, obtain latest exposures, letter summary,  call notes and review their position theses",
         "Portfolio Exposures: latest top positions and sector/geo exposure tables plus net/gross history.",
         "Manager Updates: most recent letter bullets and thesis table with Since-Report, MTD, and YTD.",
-        "Quant and Newsflow: placeholders ready for analytics and feed integration.",
-        "test"
+        "Quant and Newsflow: placeholders ready for analytics and feed integration."
     ])
 
     # ========= Data loads =========
@@ -1579,10 +1578,6 @@ def show_fund_monitor() -> None:
         df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
     fund_df = df[df.get("fund_id", pd.Series(dtype=str)).astype(str) == str(selected_canonical_id)].copy()
-
-    if fund_df.empty:
-        st.warning("No exposures found for the selected fund. Showing profile and manager updates from other sources.")
-        # fall through; tabs will handle the empty exposures case
 
     # ========= Tabs =========
     tabs = st.tabs(["Overview", "Portfolio Exposures", "Manager Updates", "Quant", "Newsflow"])
