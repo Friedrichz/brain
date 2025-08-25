@@ -242,7 +242,7 @@ def show_fund_database() -> None:
             df = pd.DataFrame()
 
         # AFTER   (Overview)
-        f1, f2, f3, f4 = st.columns(4)
+        f1, f2, f3, f4, f5 = st.columns(5)
         with f1:
             macro_vals = sorted(df["Brightside Macro"].dropna().unique().tolist()) if "Brightside Macro" in df.columns else []
             sel_macro = st.multiselect("Brightside Macro", macro_vals, default=[], key="fd_ov_macro")
@@ -255,6 +255,10 @@ def show_fund_database() -> None:
         with f4:
             fund_vals = sorted(df["Fund Name"].dropna().unique().tolist()) if "Fund Name" in df.columns else []
             sel_funds = st.multiselect("Fund Name", fund_vals, default=[], key="fd_ov_funds")
+        with f5:
+            # --- refresh button ---
+            if st.button("Refresh table", type="primary", key="fd_refresh"):
+                st.cache_data.clear()  # clears any cached Google Sheet loads
 
         filtered = df.copy()
         if sel_macro and "Brightside Macro" in filtered.columns:
