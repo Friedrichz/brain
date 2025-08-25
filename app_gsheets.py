@@ -1531,7 +1531,7 @@ def show_fund_monitor() -> None:
     df = load_sheet(exp_sheet_id, exp_ws)
     if df.empty:
         st.warning("No data returned from the exposures sheet.")
-        return
+        df = pd.DataFrame()  # continue; other data sources may exist
 
     if not ("securities_master" in st.secrets and "sheet_id" in st.secrets["securities_master"]):
         st.error("Missing 'securities_master' configuration in secrets.")
@@ -1568,10 +1568,10 @@ def show_fund_monitor() -> None:
     # ========= Fund slice =========
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    fund_df = df[df["fund_id"].astype(str) == str(selected_canonical_id)].copy()
+    fund_df = df[df.get("fund_id", pd.Series(dtype=str)).astype(str) == str(selected_canonical_id)].copy()
     if fund_df.empty:
-        st.warning("No records found for the selected fund.")
-        return
+        st.warning("No exposures found for the selected fund. Showing profile and manager updates from other sources.")
+        # fall through; tabs will handle the empty exposures case
 
     # ========= Tabs =========
     tabs = st.tabs(["Overview", "Portfolio Exposures", "Manager Updates", "Quant", "Newsflow"])
@@ -1792,24 +1792,27 @@ def show_fund_monitor() -> None:
     # Tab 2: Portfolio Exposures  (everything except historical AUM/returns)
     # --------------------------------
     with tabs[1]:
-        dates = sorted(fund_df["date"].dropna().unique().tolist(), reverse=True)
-        if not dates:
-            st.warning("No dates available for this fund.")
-            return
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            date_choice = st.selectbox("Select Date", dates, key="fm_date_select")
-        with c2:
-            file_types = fund_df["file_type"].dropna().unique().tolist() if "file_type" in fund_df.columns else []
-            if file_types:
-                file_type = st.selectbox("Select file type", file_types, key="fm_filetype_select")
-                filtered_row = fund_df[(fund_df["date"] == date_choice) & (fund_df["file_type"] == file_type)]
+        if fund_df.empty:
+            st.info("No exposure records available for this fund.")
+        else:
+            dates = sorted(fund_df["date"].dropna().unique().tolist(), reverse=True)
+            if not dates:
+                st.info("No dates available for this fund.")
             else:
-                filtered_row = fund_df[(fund_df["date"] == date_choice)]
-        if filtered_row.empty:
-            st.warning("No records found for the selected date and file type.")
-            return
-        row = filtered_row.iloc[0]
+                c1, c2 = st.columns([2, 1])
+                with c1:
+                    date_choice = st.selectbox("Select Date", dates, key="fm_date_select")
+                with c2:
+                    file_types = fund_df["file_type"].dropna().unique().tolist() if "file_type" in fund_df.columns else []
+                    if file_types:
+                        file_type = st.selectbox("Select file type", file_types, key="fm_filetype_select")
+                        filtered_row = fund_df[(fund_df["date"] == date_choice) & (fund_df["file_type"] == file_type)]
+                    else:
+                        filtered_row = fund_df[(fund_df["date"] == date_choice)]
+                if filtered_row.empty:
+                    st.info("No records found for the selected date and file type.")
+                else:
+                    row = filtered_row.iloc[0]
 
         # headline metrics
         mcols = st.columns(5)
