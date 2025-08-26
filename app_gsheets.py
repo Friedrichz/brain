@@ -2096,7 +2096,7 @@ def show_fund_monitor() -> None:
             df = news.loc[news["canonical_id"] == current_id].copy()
 
             # always ensure required columns exist to allow empty rendering
-            required_cols = ["Date","Fund Name","Content","Keywords","Link"]
+            required_cols = ["Date","Keywords","Content","Link"]
             for c in required_cols:
                 if c not in df.columns:
                     df[c] = pd.NA
