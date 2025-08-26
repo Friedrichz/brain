@@ -1848,14 +1848,12 @@ def show_fund_monitor() -> None:
         # guard and early-exit within this tab
         if filtered_row.empty:
             st.info("No records found for the selected date and file type.")
-            # safe placeholder metrics to avoid downstream usage of `row`
             mcols = st.columns(5)
             for i, lab in enumerate(["AUM", "Net", "Gross", "Long", "Short"]):
                 mcols[i].metric(lab, "-")
-            st.stop()
-
-        # from here on, `filtered_row` is guaranteed non-empty
-        row = filtered_row.iloc[0]
+        else:
+            # from here on, `filtered_row` is guaranteed non-empty
+            row = filtered_row.iloc[0]
 
         # headline metrics
         mcols = st.columns(5)
@@ -2093,28 +2091,26 @@ def show_fund_monitor() -> None:
         if news.empty:
             st.info("No news available.")
         else:
-            # normalize identifiers
             news["canonical_id"] = news["canonical_id"].astype(str).str.strip().str.lower()
-            current_id = str(selected_canonical_id).strip().lower()
+            current_id = str(selected_canonical_id).strip().str.lower()
 
-            # filter by selected fund
             df = news.loc[news["canonical_id"] == current_id].copy()
 
-            # robust date parsing and sort desc
-            df["Date"] = pd.to_datetime(df["Date"], errors="coerce", utc=True)
-            df = df.dropna(subset=["Date"]).sort_values("Date", ascending=False)
+            # always ensure required columns exist to allow empty rendering
+            required_cols = ["Date","Fund Name","Content","Keywords","Link"]
+            for c in required_cols:
+                if c not in df.columns:
+                    df[c] = pd.NA
 
-            # dedupe identical items (same Link or same Date+Content)
-            df = df.sort_values("Date", ascending=False)
-            if "Link" in df.columns:
-                df = df.drop_duplicates(subset=["Link"], keep="first")
-            df = df.drop_duplicates(subset=["Date","Content"], keep="first")
-
-            # display view
-            view = df[["Date","Fund Name","Content","Keywords","Link"]].copy()
-
-            # tighten long text for grid display
-            # (Streamlit handles wrapping; no truncation to preserve searchability)
+            if df.empty:
+                view = pd.DataFrame(columns=required_cols)
+            else:
+                df["Date"] = pd.to_datetime(df["Date"], errors="coerce", utc=True)
+                df = df.dropna(subset=["Date"]).sort_values("Date", ascending=False)
+                if "Link" in df.columns:
+                    df = df.drop_duplicates(subset=["Link"], keep="first")
+                df = df.drop_duplicates(subset=["Date","Content"], keep="first")
+                view = df[required_cols].copy()
 
             st.dataframe(
                 view,
@@ -2124,8 +2120,8 @@ def show_fund_monitor() -> None:
                     "Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD"),
                     "Keywords": st.column_config.TextColumn(),
                     "Content": st.column_config.TextColumn(),
-                    "Link": st.column_config.LinkColumn(display_text="open")
-                }
+                    "Link": st.column_config.LinkColumn(display_text="open"),
+                },
             )
 
 # ======================= END DROP-IN: Fund Monitor =======================
