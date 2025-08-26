@@ -1512,6 +1512,33 @@ def _fm_scorecard(label: str, value: str, *, big: bool = False, multiline: bool 
         unsafe_allow_html=True,
     )
 
+# ------ fund news ------------
+@st.cache_data(show_spinner=False, ttl=900)
+def _load_fund_news() -> pd.DataFrame:
+    """Load 'fund news' with fixed columns:
+       canonical_id | Fund Name | Date | Link | Content | Keywords
+    """
+    cfg = st.secrets.get("fund_news", {})
+    sheet_id = cfg.get("sheet_id")
+    worksheet = cfg.get("worksheet", "Sheet1")
+    if not sheet_id:
+        return pd.DataFrame(columns=["canonical_id","Fund Name","Date","Link","Content","Keywords"])
+    df = load_sheet(sheet_id, worksheet)
+    if not isinstance(df, pd.DataFrame):
+        return pd.DataFrame(columns=["canonical_id","Fund Name","Date","Link","Content","Keywords"])
+    # enforce expected columns if Google Sheets renamed casing
+    rename_map = {c: c.strip() for c in df.columns}
+    df = df.rename(columns=rename_map)
+    expected = ["canonical_id","Fund Name","Date","Link","Content","Keywords"]
+    missing = [c for c in expected if c not in df.columns]
+    if missing:
+        # create any missing columns so downstream never fails
+        for c in missing:
+            df[c] = pd.NA
+        df = df[expected]
+    return df
+
+
 
 # ---------- public entry: call this from main router ----------
 def show_fund_monitor() -> None:
@@ -2061,8 +2088,48 @@ def show_fund_monitor() -> None:
     # --------------------------------
     # Tab 5: News
     # --------------------------------
+    # Tab 5: Newsflow
     with tabs[4]:
-        st.info("News flow scraping (socials, google, etc) placeholder.")
+        news = _load_fund_news()
+
+        if news.empty:
+            st.info("No news available.")
+        else:
+            # normalize identifiers
+            news["canonical_id"] = news["canonical_id"].astype(str).str.strip().str.lower()
+            current_id = str(selected_canonical_id).strip().lower()
+
+            # filter by selected fund
+            df = news.loc[news["canonical_id"] == current_id].copy()
+
+            # robust date parsing and sort desc
+            df["Date"] = pd.to_datetime(df["Date"], errors="coerce", utc=True)
+            df = df.dropna(subset=["Date"]).sort_values("Date", ascending=False)
+
+            # dedupe identical items (same Link or same Date+Content)
+            df = df.sort_values("Date", ascending=False)
+            if "Link" in df.columns:
+                df = df.drop_duplicates(subset=["Link"], keep="first")
+            df = df.drop_duplicates(subset=["Date","Content"], keep="first")
+
+            # display view
+            view = df[["Date","Fund Name","Content","Keywords","Link"]].copy()
+
+            # tighten long text for grid display
+            # (Streamlit handles wrapping; no truncation to preserve searchability)
+
+            st.dataframe(
+                view,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD"),
+                    "Keywords": st.column_config.TextColumn(),
+                    "Content": st.column_config.TextColumn(),
+                    "Link": st.column_config.LinkColumn(display_text="open")
+                }
+            )
+
 # ======================= END DROP-IN: Fund Monitor =======================
 
 
