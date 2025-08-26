@@ -268,8 +268,9 @@ def show_fund_database() -> None:
             filtered = filtered[filtered["Fund Name"].isin(sel_funds)]
 
 
-                # === Dynamic column selection ===
+        # === Dynamic column selection ===
         # Baseline columns that are preselected if present
+                # === Dynamic column selection (popover) ===
         _DEFAULT_COLS = [
             "Fund Name",
             "Manager",
@@ -281,23 +282,54 @@ def show_fund_database() -> None:
             "AUM (in USD Millions)",
         ]
         avail_cols = [c for c in filtered.columns if isinstance(c, str) and c.strip()]
-
-        # Preselect currently displayed columns, but only those that exist
         preselected = [c for c in _DEFAULT_COLS if c in avail_cols]
-        selected_cols = st.multiselect(
-            "Columns to display",
-            options=avail_cols,
-            default=preselected,
-            key="fd_ov_showcols",
-            help="Tick to add columns, untick to remove. Applies to the grid below."
-        )
 
-        # Guard: always keep at least one column
+        # Initialize per-column checkbox state once
+        if "fd_ov_col_keys_init" not in st.session_state:
+            for c in avail_cols:
+                st.session_state[f"fd_ov_col_{c}"] = c in preselected
+            st.session_state["fd_ov_col_keys_init"] = True
+
+        # Derive current selection from checkbox states
+        def _current_selection():
+            return [c for c in avail_cols if st.session_state.get(f"fd_ov_col_{c}", False)]
+
+        # Popover with filter + checkboxes
+        # The label shows live count of selected columns
+        selected_snapshot = _current_selection()
+        with st.popover(f"Columns ({len(selected_snapshot)})", use_container_width=True):
+            # Text filter
+            q = st.text_input("Filter columns", key="fd_ov_col_filter", placeholder="Type to filter…")
+
+            # Actions apply to the *filtered* set
+            if q:
+                opts = [c for c in avail_cols if q.lower() in c.lower()]
+            else:
+                opts = avail_cols
+
+            c1, c2, _ = st.columns([1,1,3])
+            if c1.button("Select all", key="fd_ov_cols_select_all"):
+                for c in opts:
+                    st.session_state[f"fd_ov_col_{c}"] = True
+            if c2.button("Clear", key="fd_ov_cols_clear"):
+                for c in opts:
+                    st.session_state[f"fd_ov_col_{c}"] = False
+
+            # Scrollable list of checkboxes
+            with st.container(height=240):
+                for c in opts:
+                    st.checkbox(c, key=f"fd_ov_col_{c}")
+
+        # Guard: at least one column
+        selected_cols = _current_selection()
         if not selected_cols:
-            selected_cols = preselected if preselected else avail_cols[:1]
+            fallback = preselected if preselected else avail_cols[:1]
+            for c in avail_cols:
+                st.session_state[f"fd_ov_col_{c}"] = (c in fallback)
+            selected_cols = fallback
 
         display_df = filtered[selected_cols].copy()
-        display_df = display_df.reindex(columns=selected_cols)
+
 
 
         # top_l, top_r = st.columns([1, 0.18])
@@ -308,10 +340,9 @@ def show_fund_database() -> None:
         _empty_template = pd.DataFrame(columns=selected_cols) if selected_cols else pd.DataFrame()
         gb = GridOptionsBuilder.from_dataframe(display_df if not display_df.empty else _empty_template)
         gb.configure_default_column(editable=True, resizable=True, filter=True)
-
-        # Keep identifier columns read-only if present
         if "Fund Name" in display_df.columns:
             gb.configure_column("Fund Name", editable=False)
+
 
         gb.configure_grid_options(rowSelection="single")
         grid = AgGrid(
