@@ -268,7 +268,9 @@ def show_fund_database() -> None:
             filtered = filtered[filtered["Fund Name"].isin(sel_funds)]
 
 
-        _ALLOWED_COLS = [
+                # === Dynamic column selection ===
+        # Baseline columns that are preselected if present
+        _DEFAULT_COLS = [
             "Fund Name",
             "Manager",
             "Asset Class",
@@ -278,17 +280,39 @@ def show_fund_database() -> None:
             "Inception",
             "AUM (in USD Millions)",
         ]
-        show_cols = [c for c in _ALLOWED_COLS if c in filtered.columns]
-        display_df = filtered[show_cols].copy() if show_cols else filtered.copy()
-        display_df = display_df.reindex(columns=show_cols)
+        avail_cols = [c for c in filtered.columns if isinstance(c, str) and c.strip()]
+
+        # Preselect currently displayed columns, but only those that exist
+        preselected = [c for c in _DEFAULT_COLS if c in avail_cols]
+        selected_cols = st.multiselect(
+            "Columns to display",
+            options=avail_cols,
+            default=preselected,
+            key="fd_ov_showcols",
+            help="Tick to add columns, untick to remove. Applies to the grid below."
+        )
+
+        # Guard: always keep at least one column
+        if not selected_cols:
+            selected_cols = preselected if preselected else avail_cols[:1]
+
+        display_df = filtered[selected_cols].copy()
+        display_df = display_df.reindex(columns=selected_cols)
+
 
         # top_l, top_r = st.columns([1, 0.18])
         # with top_r:
         #     # do_save = st.button("save changes", type="primary", use_container_width=True, key="fd_ov_save")
 
-        gb = GridOptionsBuilder.from_dataframe(display_df if not display_df.empty else pd.DataFrame(columns=_ALLOWED_COLS))
+                # Build grid from the dynamically selected columns
+        _empty_template = pd.DataFrame(columns=selected_cols) if selected_cols else pd.DataFrame()
+        gb = GridOptionsBuilder.from_dataframe(display_df if not display_df.empty else _empty_template)
         gb.configure_default_column(editable=True, resizable=True, filter=True)
-        gb.configure_column("Fund Name", editable=False)
+
+        # Keep identifier columns read-only if present
+        if "Fund Name" in display_df.columns:
+            gb.configure_column("Fund Name", editable=False)
+
         gb.configure_grid_options(rowSelection="single")
         grid = AgGrid(
             display_df,
