@@ -1852,16 +1852,15 @@ def show_fund_monitor() -> None:
             for i, lab in enumerate(["AUM", "Net", "Gross", "Long", "Short"]):
                 mcols[i].metric(lab, "-")
         else:
-            # from here on, `filtered_row` is guaranteed non-empty
             row = filtered_row.iloc[0]
 
-        # headline metrics
-        mcols = st.columns(5)
-        mcols[0].metric("AUM", row.get("aum_fund") or row.get("aum_firm"))
-        mcols[1].metric("Net", row.get("net"))
-        mcols[2].metric("Gross", row.get("gross"))
-        mcols[3].metric("Long", row.get("long"))
-        mcols[4].metric("Short", row.get("short"))
+            # headline metrics
+            mcols = st.columns(5)
+            mcols[0].metric("AUM", row.get("aum_fund") or row.get("aum_firm"))
+            mcols[1].metric("Net", row.get("net"))
+            mcols[2].metric("Gross", row.get("gross"))
+            mcols[3].metric("Long", row.get("long"))
+            mcols[4].metric("Short", row.get("short"))
 
         st.markdown("**Top 10 Positions**")
         try:
@@ -1903,30 +1902,31 @@ def show_fund_monitor() -> None:
                 st.dataframe(_fm_arrow_safe(view), use_container_width=True)
 
         # exposures tables
-        st.subheader("Exposures")
-        sector_keys = ["sector_long", "sector_short", "sector_gross", "sector_net"]
-        geo_keys = ["geo_long", "geo_short", "geo_gross", "geo_net"]
-        ec1, ec2 = st.columns(2)
-        if all(k in row.index for k in sector_keys):
-            with ec1:
-                st.markdown("**Sector Exposures**")
-                try:
-                    sector_df = build_exposure_df(row, sector_keys)
-                    tbl = _format_exposure_table(sector_df)
-                    st.dataframe(_fm_arrow_safe(tbl), use_container_width=True)
-                except Exception:
-                    sector_df = build_exposure_df(row, sector_keys)
-                    st.dataframe(_fm_arrow_safe(sector_df), use_container_width=True)
-        if all(k in row.index for k in geo_keys):
-            with ec2:
-                st.markdown("**Geographical Exposures**")
-                try:
-                    geo_df = build_exposure_df(row, geo_keys)
-                    tbl = _format_exposure_table(geo_df)
-                    st.dataframe(_fm_arrow_safe(tbl), use_container_width=True)
-                except Exception:
-                    geo_df = build_exposure_df(row, geo_keys)
-                    st.dataframe(_fm_arrow_safe(geo_df), use_container_width=True)
+        if not filtered_row.empty:
+            st.subheader("Exposures")
+            sector_keys = ["sector_long", "sector_short", "sector_gross", "sector_net"]
+            geo_keys = ["geo_long", "geo_short", "geo_gross", "geo_net"]
+            ec1, ec2 = st.columns(2)
+            if all(k in row.index for k in sector_keys):
+                with ec1:
+                    st.markdown("**Sector Exposures**")
+                    try:
+                        sector_df = build_exposure_df(row, sector_keys)
+                        tbl = _format_exposure_table(sector_df)
+                        st.dataframe(_fm_arrow_safe(tbl), use_container_width=True)
+                    except Exception:
+                        sector_df = build_exposure_df(row, sector_keys)
+                        st.dataframe(_fm_arrow_safe(sector_df), use_container_width=True)
+            if all(k in row.index for k in geo_keys):
+                with ec2:
+                    st.markdown("**Geographical Exposures**")
+                    try:
+                        geo_df = build_exposure_df(row, geo_keys)
+                        tbl = _format_exposure_table(geo_df)
+                        st.dataframe(_fm_arrow_safe(tbl), use_container_width=True)
+                    except Exception:
+                        geo_df = build_exposure_df(row, geo_keys)
+                        st.dataframe(_fm_arrow_safe(geo_df), use_container_width=True)
 
         st.markdown("---")
         st.markdown("### Historical Net/Gross")
@@ -1961,7 +1961,6 @@ def show_fund_monitor() -> None:
                         .properties(height=350)
                     )
                     st.altair_chart(ch, use_container_width=True)
-
 
     # --------------------------------
     # Tab 3: Manager Updates
@@ -2092,7 +2091,7 @@ def show_fund_monitor() -> None:
             st.info("No news available.")
         else:
             news["canonical_id"] = news["canonical_id"].astype(str).str.strip().str.lower()
-            current_id = str(selected_canonical_id).strip().str.lower()
+            current_id = str(selected_canonical_id).strip().lower()
 
             df = news.loc[news["canonical_id"] == current_id].copy()
 
