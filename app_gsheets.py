@@ -693,33 +693,31 @@ _SPECIAL_MAP = {
 
 # Replace the whole function
 def _resolve_yf_symbol(t: str | None) -> str | None:
-    """
-    Map user input to a Yahoo Finance symbol.
-    Rules:
-      - Respect explicit Yahoo suffixes ('=X', '.L', etc.) and crypto '-USD'.
-      - Special overrides via _SPECIAL_MAP.
-      - Only treat 3-letter inputs as FX if they are in an allowlist of major currencies.
-      - Otherwise, return the input unchanged (e.g., 'URA' stays 'URA').
-    """
     if t is None:
         return None
     u = str(t).strip().upper()
     if not u:
         return None
 
-    # explicit overrides
+    _SPECIAL_MAP = {
+        "EUR": "EURUSD=X",
+        "BRENT": "BZ=F",
+    }
     if u in _SPECIAL_MAP:
         return _SPECIAL_MAP[u]
 
-    # already an explicit Yahoo code
-    if u.endswith("=X") or u.endswith("-USD") or "." in u:
+    # respect explicit Yahoo suffixes
+    if u.endswith("-USD") or u.endswith("=X") or "." in u:
         return u
 
-    # crypto shorthand
+    CRYPTO_TICKERS = {
+        "BNB","PHA","TON","JUP","JTO","UNI","HNT","PYTH","DYDX",
+        "BTC","ETH","SOL","ADA","AVAX","DOGE","LINK"
+    }
     if u in CRYPTO_TICKERS:
         return f"{u}-USD"
 
-    # FX allowlist (ISO codes you actually want auto-mapped)
+    # ONLY map to FX if in allowlist
     FX_THREE = {
         "EUR","GBP","JPY","CHF","AUD","CAD","NZD","CNY","CNH","SEK","NOK","DKK",
         "ZAR","PLN","MXN","BRL","TRY","INR","HKD","SGD","TWD","KRW","ILS","HUF","CZK","RON",
@@ -728,27 +726,27 @@ def _resolve_yf_symbol(t: str | None) -> str | None:
     if len(u) == 3 and u.isalpha() and u in FX_THREE:
         return f"{u}USD=X"
 
-    # default: equity/ETF/etc. — leave untouched
     return u
 
 
-@st.cache_data(show_spinner=False, ttl=900)
 # Replace the signature and body header
 @st.cache_data(show_spinner=False, ttl=900)
 def _yahoo_history_panel(tickers: list[str], lookback_days: int | None = 750) -> pd.DataFrame:
     """
-    Robust per-symbol downloader. If lookback_days is None, pull MAX available history.
-    Returns tidy frame: [date, ticker, adj_close], with 'ticker' equal to the ORIGINAL symbol.
+    Download tidy prices [date, ticker, adj_close].
+    If lookback_days is None -> pull full available history ("max").
+    Never returns None.
     """
+    cols = ["date", "ticker", "adj_close"]
     if not tickers:
-        return pd.DataFrame(columns=["date", "ticker", "adj_close"])
+        return pd.DataFrame(columns=cols)
 
     originals = [t for t in tickers if isinstance(t, str) and t.strip()]
-    mapping = {t.upper(): _resolve_yf_symbol(t) for t in originals}
+    mapping = {t.upper().strip(): _resolve_yf_symbol(t) for t in originals}
 
-    frames = []
+    frames: list[pd.DataFrame] = []
     end = pd.Timestamp.today().normalize() + pd.Timedelta(days=1)
-    start = None if lookback_days is None else (end - pd.Timedelta(days=lookback_days))
+    start = None if lookback_days is None else (end - pd.Timedelta(days=int(lookback_days)))
 
     for orig_sym, yf_sym in mapping.items():
         if not yf_sym:
@@ -758,7 +756,7 @@ def _yahoo_history_panel(tickers: list[str], lookback_days: int | None = 750) ->
 
         try:
             if lookback_days is None:
-                # Attempt #1: full history via download(period="max")
+                # full history
                 df_sym = yf.download(
                     tickers=yf_sym,
                     period="max",
@@ -769,7 +767,7 @@ def _yahoo_history_panel(tickers: list[str], lookback_days: int | None = 750) ->
                     raise_errors=False,
                 )
             else:
-                # Attempt #1: bounded range
+                # explicit range
                 df_sym = yf.download(
                     tickers=yf_sym,
                     start=start.strftime("%Y-%m-%d"),
@@ -783,31 +781,31 @@ def _yahoo_history_panel(tickers: list[str], lookback_days: int | None = 750) ->
         except Exception:
             df_sym = pd.DataFrame()
 
-        # Attempt #2: per-ticker history fallback
         if df_sym is None or df_sym.empty or (
             isinstance(df_sym.columns, pd.Index) and df_sym.dropna(how="all").empty
         ):
             try:
-                period = "max" if lookback_days is None else f"{max(lookback_days, 365)}d"
-                h = yf.Ticker(yf_sym).history(period=period, interval="1d", auto_adjust=True)
-                df_sym = h
+                period = "max" if lookback_days is None else f"{max(int(lookback_days), 365)}d"
+                df_sym = yf.Ticker(yf_sym).history(period=period, interval="1d", auto_adjust=True)
             except Exception:
                 df_sym = pd.DataFrame()
 
-        # Normalize to tidy: prefer Adj Close, fallback to Close
+        # choose Adj Close then Close
         col = None
         if isinstance(df_sym.columns, pd.MultiIndex):
             if (yf_sym, "Adj Close") in df_sym.columns:
-                col = ("Adj Close", True)
+                col = (True, "Adj Close")
             elif (yf_sym, "Close") in df_sym.columns:
-                col = ("Close", True)
+                col = (True, "Close")
         else:
             if "Adj Close" in df_sym.columns:
-                col = ("Adj Close", False)
+                col = (False, "Adj Close")
             elif "Close" in df_sym.columns:
-                col = ("Close", False)
+                col = (False, "Close")
         if not col:
             continue
+
+        serie
 
 
 def _return_slice(px: pd.DataFrame, when: str) -> pd.Series:
@@ -2598,13 +2596,12 @@ def view_market_stress():
 
 
 # === Relative Z-Score (pair) ===
-# Update helper to request max history by default
 def _pair_history(t1: str, t2: str, *, use_max: bool = True, years: int = 5) -> pd.DataFrame:
     tickers = [str(t1).upper().strip(), str(t2).upper().strip()]
     lookback = None if use_max else max(365, int(years * 365) + 30)
     px = _yahoo_history_panel(tickers, lookback_days=lookback)
-    if px.empty:
-        return pd.DataFrame(columns=["date", tickers[0], tickers[1]])
+    if px is None or px.empty:
+        return pd.DataFrame(columns=["date"] + tickers)
     w = (
         px.pivot(index="date", columns="ticker", values="adj_close")
           .dropna()
