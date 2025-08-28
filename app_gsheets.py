@@ -733,48 +733,63 @@ def _resolve_yf_symbol(t: str | None) -> str | None:
 
 
 @st.cache_data(show_spinner=False, ttl=900)
-def _yahoo_history_panel(tickers: list[str], lookback_days: int = 750) -> pd.DataFrame:
+# Replace the signature and body header
+@st.cache_data(show_spinner=False, ttl=900)
+def _yahoo_history_panel(tickers: list[str], lookback_days: int | None = 750) -> pd.DataFrame:
     """
-    Robust per-symbol downloader. Works even when bulk download drops all data.
+    Robust per-symbol downloader. If lookback_days is None, pull MAX available history.
     Returns tidy frame: [date, ticker, adj_close], with 'ticker' equal to the ORIGINAL symbol.
     """
     if not tickers:
         return pd.DataFrame(columns=["date", "ticker", "adj_close"])
 
-    # map original -> yahoo symbol
     originals = [t for t in tickers if isinstance(t, str) and t.strip()]
     mapping = {t.upper(): _resolve_yf_symbol(t) for t in originals}
 
     frames = []
     end = pd.Timestamp.today().normalize() + pd.Timedelta(days=1)
-    start = end - pd.Timedelta(days=lookback_days)
+    start = None if lookback_days is None else (end - pd.Timedelta(days=lookback_days))
 
     for orig_sym, yf_sym in mapping.items():
         if not yf_sym:
             continue
 
         df_sym = pd.DataFrame()
-        # Attempt #1: standard download with explicit date range
+
         try:
-            df_sym = yf.download(
-                tickers=yf_sym,
-                start=start.strftime("%Y-%m-%d"),
-                end=end.strftime("%Y-%m-%d"),
-                auto_adjust=True,
-                progress=False,
-                group_by="ticker",
-                threads=False,
-                raise_errors=False,
-            )
+            if lookback_days is None:
+                # Attempt #1: full history via download(period="max")
+                df_sym = yf.download(
+                    tickers=yf_sym,
+                    period="max",
+                    auto_adjust=True,
+                    progress=False,
+                    group_by="ticker",
+                    threads=False,
+                    raise_errors=False,
+                )
+            else:
+                # Attempt #1: bounded range
+                df_sym = yf.download(
+                    tickers=yf_sym,
+                    start=start.strftime("%Y-%m-%d"),
+                    end=end.strftime("%Y-%m-%d"),
+                    auto_adjust=True,
+                    progress=False,
+                    group_by="ticker",
+                    threads=False,
+                    raise_errors=False,
+                )
         except Exception:
             df_sym = pd.DataFrame()
 
-        # Attempt #2: per-ticker history if #1 empty or all NaN
+        # Attempt #2: per-ticker history fallback
         if df_sym is None or df_sym.empty or (
             isinstance(df_sym.columns, pd.Index) and df_sym.dropna(how="all").empty
         ):
             try:
-                h = yf.Ticker(yf_sym).history(period="730d", interval="1d", auto_adjust=True)
+                period = "max" if lookback_days is None else f"{max(lookback_days, 365)}d"
+                h = yf.Ticker(yf_sym).history(period=period, interval="1d", auto_adjust=True)
                 df_sym = h
             except Exception:
                 df_sym = pd.DataFrame()
@@ -791,39 +806,8 @@ def _yahoo_history_panel(tickers: list[str], lookback_days: int = 750) -> pd.Dat
                 col = ("Adj Close", False)
             elif "Close" in df_sym.columns:
                 col = ("Close", False)
-
         if not col:
             continue
-
-        if col[1]:  # from multiindex
-            series = df_sym[(yf_sym, col[0])].dropna()
-        else:
-            series = df_sym[col[0]].dropna()
-
-        if series.empty:
-            continue
-
-        sub = series.to_frame("adj_close").reset_index()
-        # unify date column name for both code paths
-        if "Date" in sub.columns:
-            sub = sub.rename(columns={"Date": "date"})
-        elif "index" in sub.columns:
-            sub = sub.rename(columns={"index": "date"})
-
-        sub["date"] = pd.to_datetime(sub["date"], errors="coerce", utc=True).dt.tz_localize(None)
-        sub = sub[(sub["date"] >= start) & (sub["date"] <= end)]
-        if sub.empty:
-            continue
-
-        sub["ticker"] = orig_sym  # keep original symbol
-        frames.append(sub[["date", "ticker", "adj_close"]])
-
-    if not frames:
-        return pd.DataFrame(columns=["date", "ticker", "adj_close"])
-
-    out = pd.concat(frames, ignore_index=True)
-    out = out.dropna(subset=["date", "adj_close"]).sort_values(["ticker", "date"])
-    return out
 
 
 def _return_slice(px: pd.DataFrame, when: str) -> pd.Series:
@@ -2614,13 +2598,11 @@ def view_market_stress():
 
 
 # === Relative Z-Score (pair) ===
-def _pair_history(t1: str, t2: str, years: int = 5) -> pd.DataFrame:
-    """Return wide df [date, t1, t2] of adj_close for the last `years`."""
-    if not isinstance(years, int) or years <= 0:
-        years = 5
-    lookback_days = int(years * 365) + 30
+# Update helper to request max history by default
+def _pair_history(t1: str, t2: str, *, use_max: bool = True, years: int = 5) -> pd.DataFrame:
     tickers = [str(t1).upper().strip(), str(t2).upper().strip()]
-    px = _yahoo_history_panel(tickers, lookback_days=lookback_days)
+    lookback = None if use_max else max(365, int(years * 365) + 30)
+    px = _yahoo_history_panel(tickers, lookback_days=lookback)
     if px.empty:
         return pd.DataFrame(columns=["date", tickers[0], tickers[1]])
     w = (
@@ -2629,12 +2611,11 @@ def _pair_history(t1: str, t2: str, years: int = 5) -> pd.DataFrame:
           .sort_index()
           .rename_axis(None, axis=1)
     )
-    # Keep only the two requested columns in the given order
     cols = [c for c in tickers if c in w.columns]
     if len(cols) < 2:
         return pd.DataFrame(columns=["date"] + tickers)
-    w = w[cols].reset_index()
-    return w.rename(columns={cols[0]: tickers[0], cols[1]: tickers[1]})
+    return w[cols].reset_index().rename(columns={cols[0]: tickers[0], cols[1]: tickers[1]})
+
 
 def _log_spread_z(df: pd.DataFrame, a: str, b: str) -> pd.DataFrame:
     """
@@ -2655,18 +2636,18 @@ def _log_spread_z(df: pd.DataFrame, a: str, b: str) -> pd.DataFrame:
 def view_relative_zscore():
     st.subheader("Relative Z-Score (Pair)")
 
-    c1, c2, c3 = st.columns([1.2, 1.2, 0.6])
+    c1, c2 = st.columns([1.2, 1])
     with c1:
         t_a = st.text_input("Security A (Yahoo Finance symbol)", value="SRUUF", key="rz_a")
-    with c2:
         t_b = st.text_input("Security B (Yahoo Finance symbol)", value="URA", key="rz_b")
-    with c3:
-        yrs = st.number_input("Years", min_value=1, max_value=30, value=5, step=1, key="rz_years")
+    with c2:
+        use_max = st.checkbox("Use max available history", value=True, key="rz_use_max")
+        yrs = st.number_input("Years (if not max)", min_value=1, max_value=30, value=5, step=1, key="rz_years", disabled=use_max)
 
     if not t_a or not t_b:
         return
 
-    pair = _pair_history(t_a, t_b, years=int(yrs))
+    pair = _pair_history(t_a, t_b, use_max=bool(use_max), years=int(yrs))
     if pair.empty:
         st.info("No overlapping history for the selected pair.")
         return
@@ -2676,37 +2657,16 @@ def view_relative_zscore():
         st.info("Unable to compute z-score for the selected pair.")
         return
 
-    # latest reading
     z_latest = float(zdf["z"].iloc[-1])
     dt_latest = pd.to_datetime(zdf["date"].iloc[-1]).date()
 
-    # Altair chart with mean and ±1/±2 bands
     import altair as alt
     base = alt.Chart(zdf).encode(x=alt.X("date:T", title="Date"))
-
     line = base.mark_line().encode(
         y=alt.Y("z:Q", title=f"Z-Score of ln({t_a.upper()}) − ln({t_b.upper()})"),
         tooltip=[alt.Tooltip("date:T"), alt.Tooltip("z:Q", title="z", format=".2f")],
     )
-
-    rules = alt.Chart(
-        pd.DataFrame({"y": [0, 1, -1, 2, -2]})
-    ).mark_rule(strokeDash=[4, 4]).encode(y="y:Q")
-
-    labels = alt.Chart(
-        pd.DataFrame({"y": [2, -2], "text": ["+2σ", "−2σ"]})
-    ).mark_text(
-        dx=4, dy=-4, align="left"
-    ).encode(y="y:Q", text="text:N")
-
-    st.altair_chart((line + rules + labels).properties(height=420), use_container_width=True)
-
-    # Status strip
-    cL, cR = st.columns([1, 2])
-    with cL:
-        st.metric("Latest z-score", f"{z_latest:.2f}", help=f"As of {dt_latest}")
-    with cR:
-        st.caption("Bands shown: mean (0), ±1σ, ±2σ. Spread defined as ln(A) − ln(B).")
+    rules = alt.Chart(pd.DataFrame({"y": [0, 1, -1, 2, -2]})).mark_r_
 
 
 # Router for Market Analytics
