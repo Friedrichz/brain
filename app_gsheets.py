@@ -2682,7 +2682,14 @@ def view_relative_zscore():
     dt_latest = pd.to_datetime(zdf["date"].iloc[-1]).date()
 
     import altair as alt
-    base = alt.Chart(zdf).encode(x=alt.X("date:T", title="Date"))
+    base = alt.Chart(zdf).encode(
+        x=alt.X(
+            "date:T",
+            title="Date",
+            axis=alt.Axis(format="%b %Y", labelAngle=-30, labelOverlap=False),
+            scale=alt.Scale(nice="year")
+        )
+    )
 
     line = base.mark_line().encode(
         y=alt.Y("z:Q", title=f"Z-Score of ln({t_a.upper()}) − ln({t_b.upper()})"),
