@@ -2681,7 +2681,7 @@ def view_relative_zscore():
     z_latest = float(zdf["z"].iloc[-1])
     dt_latest = pd.to_datetime(zdf["date"].iloc[-1]).date()
 
-        import altair as alt
+    import altair as alt
     base = alt.Chart(zdf).encode(x=alt.X("date:T", title="Date"))
 
     line = base.mark_line().encode(
