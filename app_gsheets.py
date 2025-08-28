@@ -2684,19 +2684,50 @@ def view_relative_zscore():
     import altair as alt
     base = alt.Chart(zdf).encode(x=alt.X("date:T", title="Date"))
 
+    # main line
     line = base.mark_line().encode(
         y=alt.Y("z:Q", title=f"Z-Score of ln({t_a.upper()}) − ln({t_b.upper()})"),
         tooltip=[alt.Tooltip("date:T"), alt.Tooltip("z:Q", title="z", format=".2f")],
     )
 
-    # horizontal reference lines at 0, ±1, ±2
-    rules_df = pd.DataFrame({"y": [-2, -1, 0, 1, 2]})
-    rules = alt.Chart(rules_df).mark_rule(strokeDash=[4, 4]).encode(y="y:Q")
+    # horizontal reference levels
+    ref_levels = pd.DataFrame({
+        "y": [-2, -1, 0, 1, 2],
+        "label": ["−2σ", "−1σ", "mean (μ)", "+1σ", "+2σ"]
+    })
 
-    chart = (line + rules).properties(height=360)
+    rules = (
+        alt.Chart(ref_levels)
+        .mark_rule(strokeDash=[4, 4], color="#888")
+        .encode(y="y:Q")
+    )
+
+    # right-edge annotations placed slightly above each rule
+    last_date = pd.to_datetime(zdf["date"]).max()
+    labels_df = ref_levels.assign(x=last_date)
+
+    labels = (
+        alt.Chart(labels_df)
+        .mark_text(align="left", dx=6, dy=-2, fontSize=12, color="#444")
+        .encode(x="x:T", y="y:Q", text="label:N")
+    )
+
+    chart = (line + rules + labels).properties(height=360)
     st.altair_chart(chart, use_container_width=True)
 
+    # quick readout and interpretation
     st.metric(label="Latest z", value=f"{z_latest:.2f}", help=f"As of {dt_latest}")
+    if z_latest >= 2:
+        st.caption("Context: > +2σ — extreme positive spread relative to its historical mean.")
+    elif z_latest >= 1:
+        st.caption("Context: between +1σ and +2σ — meaningfully above mean; revert/mean-reversion setups often evaluated here.")
+    elif z_latest > -1 and z_latest < 1:
+        st.caption("Context: between −1σ and +1σ — near mean (μ); low signal.")
+    elif z_latest <= -2:
+        st.caption("Context: < −2σ — extreme negative spread relative to its historical mean.")
+    else:  # between -2 and -1
+        st.caption("Context: between −1σ and −2σ — meaningfully below mean; revert/mean-reversion setups often evaluated here.")
+
 
 
 
