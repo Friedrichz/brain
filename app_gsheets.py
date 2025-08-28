@@ -2683,11 +2683,21 @@ def view_relative_zscore():
 
     import altair as alt
     base = alt.Chart(zdf).encode(x=alt.X("date:T", title="Date"))
+
     line = base.mark_line().encode(
         y=alt.Y("z:Q", title=f"Z-Score of ln({t_a.upper()}) − ln({t_b.upper()})"),
         tooltip=[alt.Tooltip("date:T"), alt.Tooltip("z:Q", title="z", format=".2f")],
     )
-    rules = alt.Chart(pd.DataFrame({"y": [0, 1, -1, 2, -2]})).mark_rule()
+
+    # horizontal reference lines at 0, ±1, ±2
+    rules_df = pd.DataFrame({"y": [-2, -1, 0, 1, 2]})
+    rules = alt.Chart(rules_df).mark_rule(strokeDash=[4, 4]).encode(y="y:Q")
+
+    chart = (line + rules).properties(height=360)
+    st.altair_chart(chart, use_container_width=True)
+
+    st.metric(label="Latest z", value=f"{z_latest:.2f}", help=f"As of {dt_latest}")
+
 
 
 # Router for Market Analytics
