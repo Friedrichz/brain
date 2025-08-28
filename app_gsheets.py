@@ -271,15 +271,10 @@ def show_fund_database() -> None:
         # === Dynamic column selection ===
         # Baseline columns that are preselected if present
                 # === Dynamic column selection (popover) ===
+        # === Dynamic column selection ===
         _DEFAULT_COLS = [
-            "Fund Name",
-            "Manager",
-            "Asset Class",
-            "Type",
-            "Management Fee",
-            "Performance Fee",
-            "Inception",
-            "AUM (in USD Millions)",
+            "Fund Name","Manager","Asset Class","Type",
+            "Management Fee","Performance Fee","Inception","AUM (in USD Millions)",
         ]
         avail_cols = [c for c in filtered.columns if isinstance(c, str) and c.strip()]
         preselected = [c for c in _DEFAULT_COLS if c in avail_cols]
@@ -290,22 +285,21 @@ def show_fund_database() -> None:
                 st.session_state[f"fd_ov_col_{c}"] = c in preselected
             st.session_state["fd_ov_col_keys_init"] = True
 
-        # Derive current selection from checkbox states
         def _current_selection():
             return [c for c in avail_cols if st.session_state.get(f"fd_ov_col_{c}", False)]
 
+        # NEW: enforce fallback BEFORE rendering any checkboxes
+        _selected_now = _current_selection()
+        if not _selected_now:
+            _fallback = preselected if preselected else avail_cols[:1]
+            for c in avail_cols:
+                st.session_state[f"fd_ov_col_{c}"] = (c in _fallback)
+
         # Popover with filter + checkboxes
-        # The label shows live count of selected columns
         selected_snapshot = _current_selection()
         with st.popover(f"Columns ({len(selected_snapshot)})", use_container_width=True):
-            # Text filter
             q = st.text_input("Filter columns", key="fd_ov_col_filter", placeholder="Type to filter…")
-
-            # Actions apply to the *filtered* set
-            if q:
-                opts = [c for c in avail_cols if q.lower() in c.lower()]
-            else:
-                opts = avail_cols
+            opts = [c for c in avail_cols if (q.lower() in c.lower())] if q else avail_cols
 
             c1, c2, _ = st.columns([1,1,3])
             if c1.button("Select all", key="fd_ov_cols_select_all"):
@@ -315,22 +309,13 @@ def show_fund_database() -> None:
                 for c in opts:
                     st.session_state[f"fd_ov_col_{c}"] = False
 
-            # Scrollable list of checkboxes
             with st.container(height=240):
                 for c in opts:
                     st.checkbox(c, key=f"fd_ov_col_{c}")
 
-        # Guard: at least one column
+        # Derive current selection and build display
         selected_cols = _current_selection()
-        if not selected_cols:
-            fallback = preselected if preselected else avail_cols[:1]
-            for c in avail_cols:
-                st.session_state[f"fd_ov_col_{c}"] = (c in fallback)
-            selected_cols = fallback
-
         display_df = filtered[selected_cols].copy()
-
-
 
         # top_l, top_r = st.columns([1, 0.18])
         # with top_r:
