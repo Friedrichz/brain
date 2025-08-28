@@ -2681,35 +2681,37 @@ def view_relative_zscore():
     z_latest = float(zdf["z"].iloc[-1])
     dt_latest = pd.to_datetime(zdf["date"].iloc[-1]).date()
 
-    import altair as alt
+        import altair as alt
     base = alt.Chart(zdf).encode(x=alt.X("date:T", title="Date"))
 
-    # main line
     line = base.mark_line().encode(
         y=alt.Y("z:Q", title=f"Z-Score of ln({t_a.upper()}) − ln({t_b.upper()})"),
         tooltip=[alt.Tooltip("date:T"), alt.Tooltip("z:Q", title="z", format=".2f")],
     )
 
-    # horizontal reference levels
+    # reference lines with labels
     ref_levels = pd.DataFrame({
         "y": [-2, -1, 0, 1, 2],
-        "label": ["−2σ", "−1σ", "mean (μ)", "+1σ", "+2σ"]
+        "label": ["−2σ", "−1σ", "μ", "+1σ", "+2σ"]
     })
 
     rules = (
         alt.Chart(ref_levels)
-        .mark_rule(strokeDash=[4, 4], color="#888")
+        .mark_rule(strokeDash=[4, 4], color="#999")
         .encode(y="y:Q")
     )
 
-    # right-edge annotations placed slightly above each rule
-    last_date = pd.to_datetime(zdf["date"]).max()
-    labels_df = ref_levels.assign(x=last_date)
-
     labels = (
-        alt.Chart(labels_df)
-        .mark_text(align="left", dx=6, dy=-2, fontSize=12, color="#444")
-        .encode(x="x:T", y="y:Q", text="label:N")
+        alt.Chart(ref_levels)
+        .mark_text(
+            align="left", dx=6, dy=-6,  # shift above line
+            fontSize=11, fontWeight="bold", color="#444"
+        )
+        .encode(
+            x=alt.value(zdf["date"].max()),  # put at right edge
+            y="y:Q",
+            text="label:N"
+        )
     )
 
     chart = (line + rules + labels).properties(height=360)
