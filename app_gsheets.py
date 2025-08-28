@@ -691,19 +691,46 @@ _SPECIAL_MAP = {
     "BRENT": "BZ=F",     # ICE Brent futures
 }
 
+# Replace the whole function
 def _resolve_yf_symbol(t: str | None) -> str | None:
+    """
+    Map user input to a Yahoo Finance symbol.
+    Rules:
+      - Respect explicit Yahoo suffixes ('=X', '.L', etc.) and crypto '-USD'.
+      - Special overrides via _SPECIAL_MAP.
+      - Only treat 3-letter inputs as FX if they are in an allowlist of major currencies.
+      - Otherwise, return the input unchanged (e.g., 'URA' stays 'URA').
+    """
     if t is None:
         return None
     u = str(t).strip().upper()
+    if not u:
+        return None
+
+    # explicit overrides
     if u in _SPECIAL_MAP:
         return _SPECIAL_MAP[u]
-    if u.endswith("-USD") or u.endswith("=X") or "." in u:
+
+    # already an explicit Yahoo code
+    if u.endswith("=X") or u.endswith("-USD") or "." in u:
         return u
+
+    # crypto shorthand
     if u in CRYPTO_TICKERS:
         return f"{u}-USD"
-    if len(u) == 3 and u.isalpha():   # generic FX like "EUR"
+
+    # FX allowlist (ISO codes you actually want auto-mapped)
+    FX_THREE = {
+        "EUR","GBP","JPY","CHF","AUD","CAD","NZD","CNY","CNH","SEK","NOK","DKK",
+        "ZAR","PLN","MXN","BRL","TRY","INR","HKD","SGD","TWD","KRW","ILS","HUF","CZK","RON",
+        "CLP","COP","PEN","THB","IDR","PHP","MYR","AED","SAR"
+    }
+    if len(u) == 3 and u.isalpha() and u in FX_THREE:
         return f"{u}USD=X"
+
+    # default: equity/ETF/etc. — leave untouched
     return u
+
 
 @st.cache_data(show_spinner=False, ttl=900)
 def _yahoo_history_panel(tickers: list[str], lookback_days: int = 750) -> pd.DataFrame:
@@ -2680,10 +2707,6 @@ def view_relative_zscore():
         st.metric("Latest z-score", f"{z_latest:.2f}", help=f"As of {dt_latest}")
     with cR:
         st.caption("Bands shown: mean (0), ±1σ, ±2σ. Spread defined as ln(A) − ln(B).")
-
-
-
-
 
 
 # Router for Market Analytics
