@@ -2722,6 +2722,43 @@ def view_relative_zscore():
         )
     )
 
+    # === Relative performance scorecards ===
+    st.markdown("### Relative Performance A vs B")
+
+    pair["date"] = pd.to_datetime(pair["date"], errors="coerce")
+    pair = pair.dropna().sort_values("date")
+    a_col, b_col = t_a.upper(), t_b.upper()
+
+    def rel_return(df, start):
+        sub = df[df["date"] >= start]
+        if sub.empty:
+            return None
+        a0, b0 = sub.iloc[0][a_col], sub.iloc[0][b_col]
+        a1, b1 = sub.iloc[-1][a_col], sub.iloc[-1][b_col]
+        if b0 <= 0 or b1 <= 0:
+            return None
+        r = (a1/b1) / (a0/b0) - 1.0
+        return round(r*100,2)
+
+    today = pair["date"].max().normalize()
+    start_mtd = today.replace(day=1)
+    start_ytd = today.replace(month=1, day=1)
+    start_6m = today - pd.DateOffset(months=6)
+    start_1y = today - pd.DateOffset(years=1)
+
+    metrics = {
+        "MTD": rel_return(pair, start_mtd),
+        "6M": rel_return(pair, start_6m),
+        "YTD": rel_return(pair, start_ytd),
+        "1Y": rel_return(pair, start_1y),
+    }
+
+    c1, c2, c3, c4 = st.columns(4)
+    for c, (lab, val) in zip([c1,c2,c3,c4], metrics.items()):
+        txt = f"{val:.2f}%" if val is not None else "-"
+        c.metric(label=lab, value=txt)
+
+
     chart = (line + rules + labels).properties(height=360)
     st.altair_chart(chart, use_container_width=True)
 
