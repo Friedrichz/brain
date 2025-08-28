@@ -2738,6 +2738,146 @@ def view_relative_zscore():
     else:  # between -2 and -1
         st.caption("Context: between −1σ and −2σ — meaningfully below mean; revert/mean-reversion setups often evaluated here.")
 
+    # EVENT STUDY FORWARD LOOKING
+    st.markdown("### Forward performance after similar z")
+
+    # controls
+    tol = st.slider("Match tolerance (|z − z*|)", min_value=0.05, max_value=1.00, value=0.25, step=0.05, help="z* = latest z")
+    horizon_td = st.slider("Forward window (trading days)", min_value=60, max_value=260, value=252, step=5)
+    min_spacing = st.slider("Min spacing between events (days)", min_value=20, max_value=252, value=63, step=1)
+
+    # prep series
+    pair["date"] = pd.to_datetime(pair["date"], errors="coerce")
+    px = pair.dropna().sort_values("date").set_index("date")
+    a_col, b_col = t_a.upper(), t_b.upper()
+
+    # match event dates (exclude last few days to avoid incomplete paths)
+    zsr = zdf.dropna().copy()
+    zsr["date"] = pd.to_datetime(zsr["date"], errors="coerce")
+    zsr = zsr.set_index("date")["z"].sort_index()
+    z_star = float(zsr.iloc[-1])
+
+    candidates = zsr.index[(zsr - z_star).abs() <= float(tol)]
+    candidates = candidates[candidates < (zsr.index[-1] - pd.Timedelta(days=5))]  # leave tail
+
+    # enforce spacing
+    events = []
+    for d in candidates:
+        if not events or (d - events[-1]).days >= int(min_spacing):
+            events.append(d)
+    events = pd.to_datetime(pd.Index(events))
+
+    def forward_paths(df, col):
+        paths = []
+        for d in events:
+            # anchor = first trading day on/after event date
+            if d not in df.index:
+                nxt = df.index[df.index.get_indexer([d], method="backfill")]
+                if len(nxt) == 0:
+                    continue
+                d0 = nxt[0]
+            else:
+                d0 = d
+            seg = df.loc[d0:].iloc[:int(horizon_td)].copy()
+            if seg.empty:
+                continue
+            base = float(seg[col].iloc[0])
+            if base <= 0:
+                continue
+            seg = seg.assign(
+                t=np.arange(len(seg), dtype=int),
+                ret=(seg[col] / base - 1.0),
+                event=d0
+            )[["t", "ret", "event"]]
+            paths.append(seg)
+        if not paths:
+            return pd.DataFrame(columns=["t","ret","event"])
+        out = pd.concat(paths, ignore_index=True)
+        # mean path
+        avg = out.groupby("t", as_index=False)["ret"].mean().assign(event="AVERAGE")
+        return pd.concat([out, avg], ignore_index=True)
+
+    # compute paths for A, B, and log-spread (A/B)
+    paths_a = forward_paths(px, a_col)
+    paths_b = forward_paths(px, b_col)
+
+    # spread via log prices to match z definition
+    logA = np.log(px[a_col].astype(float))
+    logB = np.log(px[b_col].astype(float))
+    px_spread = pd.DataFrame({"date": px.index, "S": (logA - logB).values}).set_index("date")
+
+    def forward_paths_spread(df):
+        paths = []
+        for d in events:
+            if d not in df.index:
+                nxt = df.index[df.index.get_indexer([d], method="backfill")]
+                if len(nxt) == 0:
+                    continue
+                d0 = nxt[0]
+            else:
+                d0 = d
+            seg = df.loc[d0:].iloc[:int(horizon_td)].copy()
+            if seg.empty:
+                continue
+            base = float(seg["S"].iloc[0])
+            seg = seg.assign(
+                t=np.arange(len(seg), dtype=int),
+                ret=(seg["S"] - base),  # change in log-spread
+                event=d0
+            )[["t","ret","event"]]
+            paths.append(seg)
+        if not paths:
+            return pd.DataFrame(columns=["t","ret","event"])
+        out = pd.concat(paths, ignore_index=True)
+        avg = out.groupby("t", as_index=False)["ret"].mean().assign(event="AVERAGE")
+        return pd.concat([out, avg], ignore_index=True)
+
+    paths_s = forward_paths_spread(px_spread)
+
+    def plot_paths(df, title, is_pct: bool):
+        if df.empty:
+            st.info(f"No eligible events for {title.lower()}.")
+            return
+        base = alt.Chart(df)
+        many = base.transform_filter(alt.datum.event != "AVERAGE").mark_line(opacity=0.25).encode(
+            x=alt.X("t:Q", title="Forward trading days"),
+            y=alt.Y("ret:Q", title=("Return" if is_pct else "Δ log-spread"),
+                    axis=alt.Axis(format="~%" if is_pct else "")),
+            detail="event:N"
+        )
+        avg = base.transform_filter(alt.datum.event == "AVERAGE").mark_line(size=3).encode(
+            x="t:Q",
+            y=alt.Y("ret:Q", axis=alt.Axis(format="~%" if is_pct else "")),
+            color=alt.value("#000")
+        )
+        st.altair_chart((many + avg).properties(height=340, title=title), use_container_width=True)
+
+    def terminal_hist(df, title, is_pct: bool):
+        if df.empty:
+            return
+        last_t = int(df["t"].max()) if not df.empty else 0
+        term = df[(df["t"] == last_t) & (df["event"] != "AVERAGE")]["ret"]
+        if term.empty:
+            return
+        hist = alt.Chart(pd.DataFrame({"x": term.values})).mark_bar().encode(
+            x=alt.X("x:Q", bin=alt.Bin(maxbins=30), title=("1-year return" if is_pct else "1-year Δ log-spread"),
+                    axis=alt.Axis(format="~%" if is_pct else "")),
+            y=alt.Y("count()", title="Count")
+        ).properties(height=200, title=f"{title} — terminal distribution")
+        st.altair_chart(hist, use_container_width=True)
+
+    cols = st.columns(3)
+    with cols[0]:
+        plot_paths(paths_a.assign(ret=paths_a["ret"].astype(float)), f"{a_col}: forward path after similar z", is_pct=True)
+        terminal_hist(paths_a, f"{a_col}", is_pct=True)
+    with cols[1]:
+        plot_paths(paths_b.assign(ret=paths_b["ret"].astype(float)), f"{b_col}: forward path after similar z", is_pct=True)
+        terminal_hist(paths_b, f"{b_col}", is_pct=True)
+    with cols[2]:
+        plot_paths(paths_s.assign(ret=paths_s["ret"].astype(float)), "log-spread(A−B): forward path after similar z", is_pct=False)
+        terminal_hist(paths_s, "log-spread(A−B)", is_pct=False)
+
+    st.caption(f"Events matched: {len([e for e in events])}. ‘AVERAGE’ = mean of matched paths.")
 
 # Router for Market Analytics
 # Replace the whole function
