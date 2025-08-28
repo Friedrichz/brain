@@ -2692,7 +2692,7 @@ def view_relative_zscore():
     # reference lines with labels
     ref_levels = pd.DataFrame({
         "y": [-2, -1, 0, 1, 2],
-        "label": ["−2σ", "−1σ", "μ", "+1σ", "+2σ"]
+        "label": ["−2σ", "−1σ", "μ", "+1σ", "+2σ"],
     })
 
     rules = (
@@ -2701,16 +2701,17 @@ def view_relative_zscore():
         .encode(y="y:Q")
     )
 
+    # NEW: provide a proper temporal field for x instead of alt.value(...)
+    last_date = pd.to_datetime(zdf["date"].max(), errors="coerce")
+    ref_levels_lbl = ref_levels.assign(date=last_date)
+
     labels = (
-        alt.Chart(ref_levels)
-        .mark_text(
-            align="left", dx=6, dy=-6,  # shift above line
-            fontSize=11, fontWeight="bold", color="#444"
-        )
+        alt.Chart(ref_levels_lbl)
+        .mark_text(align="left", dx=6, dy=-6, fontSize=11, fontWeight="bold", color="#444")
         .encode(
-            x=alt.value(zdf["date"].max()),  # put at right edge
-            y="y:Q",
-            text="label:N"
+            x=alt.X("date:T"),
+            y=alt.Y("y:Q"),
+            text="label:N",
         )
     )
 
@@ -2729,8 +2730,6 @@ def view_relative_zscore():
         st.caption("Context: < −2σ — extreme negative spread relative to its historical mean.")
     else:  # between -2 and -1
         st.caption("Context: between −1σ and −2σ — meaningfully below mean; revert/mean-reversion setups often evaluated here.")
-
-
 
 
 # Router for Market Analytics
