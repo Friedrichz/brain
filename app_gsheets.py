@@ -2687,7 +2687,7 @@ def view_relative_zscore():
         y=alt.Y("z:Q", title=f"Z-Score of ln({t_a.upper()}) − ln({t_b.upper()})"),
         tooltip=[alt.Tooltip("date:T"), alt.Tooltip("z:Q", title="z", format=".2f")],
     )
-    rules = alt.Chart(pd.DataFrame({"y": [0, 1, -1, 2, -2]})).mark_r_
+    rules = alt.Chart(pd.DataFrame({"y": [0, 1, -1, 2, -2]})).mark_rule()
 
 
 # Router for Market Analytics
