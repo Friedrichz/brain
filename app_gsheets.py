@@ -2696,7 +2696,7 @@ def show_market_analytics():
         "Controls persist across both views for a single chosen ticker."
     ])
 
-    tabs = st.tabs(["Seasonality & Market Memory", "Relative Z-Score (Pair)"])
+    tabs = st.tabs(["Seasonality & Market Memory", "Relative Z-Score"])
 
     # --- Tab 1: Seasonality & Market Memory ---
     with tabs[0]:
