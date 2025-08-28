@@ -2680,49 +2680,8 @@ def view_relative_zscore():
 
     z_latest = float(zdf["z"].iloc[-1])
     dt_latest = pd.to_datetime(zdf["date"].iloc[-1]).date()
-
-    import altair as alt
-    base = alt.Chart(zdf).encode(
-        x=alt.X(
-            "date:T",
-            title="Date",
-            axis=alt.Axis(format="%b %Y", labelAngle=-30, labelOverlap=False),
-            scale=alt.Scale(nice="year")
-        )
-    )
-
-    line = base.mark_line().encode(
-        y=alt.Y("z:Q", title=f"Z-Score of ln({t_a.upper()}) − ln({t_b.upper()})"),
-        tooltip=[alt.Tooltip("date:T"), alt.Tooltip("z:Q", title="z", format=".2f")],
-    )
-
-    # reference lines with labels
-    ref_levels = pd.DataFrame({
-        "y": [-2, -1, 0, 1, 2],
-        "label": ["−2σ", "−1σ", "μ", "+1σ", "+2σ"],
-    })
-
-    rules = (
-        alt.Chart(ref_levels)
-        .mark_rule(strokeDash=[4, 4], color="#999")
-        .encode(y="y:Q")
-    )
-
-    # NEW: provide a proper temporal field for x instead of alt.value(...)
-    last_date = pd.to_datetime(zdf["date"].max(), errors="coerce")
-    ref_levels_lbl = ref_levels.assign(date=last_date)
-
-    labels = (
-        alt.Chart(ref_levels_lbl)
-        .mark_text(align="left", dx=6, dy=-6, fontSize=11, fontWeight="bold", color="#444")
-        .encode(
-            x=alt.X("date:T"),
-            y=alt.Y("y:Q"),
-            text="label:N",
-        )
-    )
-
-    # === Relative performance scorecards ===
+    
+     # === Relative performance scorecards ===
     st.markdown("### Relative Performance A vs B")
 
     pair["date"] = pd.to_datetime(pair["date"], errors="coerce")
@@ -2759,8 +2718,53 @@ def view_relative_zscore():
         c.metric(label=lab, value=txt)
 
 
+    import altair as alt
+    base = alt.Chart(zdf).encode(
+        x=alt.X(
+            "date:T",
+            title="Date",
+            axis=alt.Axis(format="%b %Y", labelAngle=-30, labelOverlap=False),
+            scale=alt.Scale(nice="year")
+        )
+    )
+
+    line = base.mark_line().encode(
+        y=alt.Y("z:Q", title=f"Z-Score of ln({t_a.upper()}) − ln({t_b.upper()})"),
+        tooltip=[alt.Tooltip("date:T"), alt.Tooltip("z:Q", title="z", format=".2f")],
+    )
+
+    # reference lines with labels
+    # --- reference lines with labels (force re-render per selection) ---
+    # Keep the lines expressed in z-units; recompute and re-render on every ticker change.
+    ref_levels = pd.DataFrame({
+        "y": [-2, -1, 0, 1, 2],
+        "label": ["−2σ", "−1σ", "μ", "+1σ", "+2σ"],
+    })
+
+    last_date = pd.to_datetime(zdf["date"].max(), errors="coerce")
+    ref_levels_lbl = ref_levels.assign(date=last_date)
+
+    rules = (
+        alt.Chart(ref_levels)
+        .mark_rule(strokeDash=[4, 4], color="#999")
+        .encode(y="y:Q")
+    )
+
+    labels = (
+        alt.Chart(ref_levels_lbl)
+        .mark_text(align="left", dx=6, dy=-6, fontSize=11, fontWeight="bold", color="#444")
+        .encode(
+            x=alt.X("date:T"),
+            y=alt.Y("y:Q"),
+            text="label:N",
+        )
+    )
+
     chart = (line + rules + labels).properties(height=360)
-    st.altair_chart(chart, use_container_width=True)
+
+    # Force Streamlit to treat each parameter set as a distinct widget to avoid stale overlays.
+    chart_key = f"rz_chart_{t_a.upper()}_{t_b.upper()}_{int(bool(use_max))}_{int(yrs)}"
+    st.altair_chart(chart, use_container_width=True, key=chart_key)
 
     # quick readout and interpretation
     st.metric(label="Latest z", value=f"{z_latest:.2f}", help=f"As of {dt_latest}")
