@@ -2659,8 +2659,8 @@ def view_relative_zscore():
 
     c1, c2 = st.columns([1.2, 1])
     with c1:
-        t_a = st.text_input("Security A (Yahoo Finance symbol)", value="SRUUF", key="rz_a")
-        t_b = st.text_input("Security B (Yahoo Finance symbol)", value="URA", key="rz_b")
+        t_a = st.text_input("Security A (Yahoo Finance symbol)", value="URA", key="rz_a")
+        t_b = st.text_input("Security B (Yahoo Finance symbol)", value="SRUUF", key="rz_b")
     with c2:
         use_max = st.checkbox("Use max available history", value=True, key="rz_use_max")
         yrs = st.number_input("Years (if not max)", min_value=1, max_value=30, value=5, step=1, key="rz_years", disabled=use_max)
