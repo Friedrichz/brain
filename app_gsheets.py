@@ -733,14 +733,16 @@ def _resolve_yf_symbol(t: str | None) -> str | None:
 @st.cache_data(show_spinner=False, ttl=900)
 def _yahoo_history_panel(tickers: list[str], lookback_days: int | None = 750) -> pd.DataFrame:
     """
-    Download tidy prices [date, ticker, adj_close].
-    If lookback_days is None -> pull full available history ("max").
-    Never returns None.
+    Download tidy prices [date, ticker, adj_close] for the requested Yahoo symbols.
+    - Accepts a list of user-entered tickers; each is mapped via _resolve_yf_symbol().
+    - If lookback_days is None, pulls full available history ("max").
+    - Never returns None; returns an empty DataFrame with columns on failure.
     """
     cols = ["date", "ticker", "adj_close"]
     if not tickers:
         return pd.DataFrame(columns=cols)
 
+    # Map original -> Yahoo symbol while preserving original as the output 'ticker'
     originals = [t for t in tickers if isinstance(t, str) and t.strip()]
     mapping = {t.upper().strip(): _resolve_yf_symbol(t) for t in originals}
 
@@ -754,9 +756,9 @@ def _yahoo_history_panel(tickers: list[str], lookback_days: int | None = 750) ->
 
         df_sym = pd.DataFrame()
 
+        # Attempt #1: bulk download
         try:
             if lookback_days is None:
-                # full history
                 df_sym = yf.download(
                     tickers=yf_sym,
                     period="max",
@@ -767,7 +769,6 @@ def _yahoo_history_panel(tickers: list[str], lookback_days: int | None = 750) ->
                     raise_errors=False,
                 )
             else:
-                # explicit range
                 df_sym = yf.download(
                     tickers=yf_sym,
                     start=start.strftime("%Y-%m-%d"),
@@ -781,6 +782,7 @@ def _yahoo_history_panel(tickers: list[str], lookback_days: int | None = 750) ->
         except Exception:
             df_sym = pd.DataFrame()
 
+        # Attempt #2: per-ticker history fallback
         if df_sym is None or df_sym.empty or (
             isinstance(df_sym.columns, pd.Index) and df_sym.dropna(how="all").empty
         ):
@@ -790,7 +792,7 @@ def _yahoo_history_panel(tickers: list[str], lookback_days: int | None = 750) ->
             except Exception:
                 df_sym = pd.DataFrame()
 
-        # choose Adj Close then Close
+        # Choose Adj Close then Close
         col = None
         if isinstance(df_sym.columns, pd.MultiIndex):
             if (yf_sym, "Adj Close") in df_sym.columns:
@@ -805,7 +807,29 @@ def _yahoo_history_panel(tickers: list[str], lookback_days: int | None = 750) ->
         if not col:
             continue
 
-        serie
+        series = (df_sym[(yf_sym, col[1])] if col[0] else df_sym[col[1]]).dropna()
+        if series.empty:
+            continue
+
+        # Tidy and trim
+        sub = series.to_frame("adj_close").reset_index()
+        sub = sub.rename(columns={"Date": "date", "index": "date"})
+        sub["date"] = pd.to_datetime(sub["date"], errors="coerce", utc=True).dt.tz_localize(None)
+        if lookback_days is not None:
+            sub = sub[(sub["date"] >= start) & (sub["date"] <= end)]
+        if sub.empty:
+            continue
+
+        sub["ticker"] = orig_sym
+        frames.append(sub[["date", "ticker", "adj_close"]])
+
+    if not frames:
+        return pd.DataFrame(columns=cols)
+
+    out = pd.concat(frames, ignore_index=True)
+    return out.dropna(subset=["date", "adj_close"]).sort_values(["ticker", "date"])
+
+
 
 
 def _return_slice(px: pd.DataFrame, when: str) -> pd.Series:
