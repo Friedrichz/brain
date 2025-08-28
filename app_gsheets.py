@@ -2585,32 +2585,138 @@ def view_market_stress():
     st.altair_chart(ch, use_container_width=True)
     st.caption("Composite blends VIX, HY OAS (FRED), 10y–2y curve (FRED), and SPY drawdown into a 0–100 scale.")
 
+
+# === Relative Z-Score (pair) ===
+def _pair_history(t1: str, t2: str, years: int = 5) -> pd.DataFrame:
+    """Return wide df [date, t1, t2] of adj_close for the last `years`."""
+    if not isinstance(years, int) or years <= 0:
+        years = 5
+    lookback_days = int(years * 365) + 30
+    tickers = [str(t1).upper().strip(), str(t2).upper().strip()]
+    px = _yahoo_history_panel(tickers, lookback_days=lookback_days)
+    if px.empty:
+        return pd.DataFrame(columns=["date", tickers[0], tickers[1]])
+    w = (
+        px.pivot(index="date", columns="ticker", values="adj_close")
+          .dropna()
+          .sort_index()
+          .rename_axis(None, axis=1)
+    )
+    # Keep only the two requested columns in the given order
+    cols = [c for c in tickers if c in w.columns]
+    if len(cols) < 2:
+        return pd.DataFrame(columns=["date"] + tickers)
+    w = w[cols].reset_index()
+    return w.rename(columns={cols[0]: tickers[0], cols[1]: tickers[1]})
+
+def _log_spread_z(df: pd.DataFrame, a: str, b: str) -> pd.DataFrame:
+    """
+    Compute z-score of S_t = ln(A_t) - ln(B_t) across the full window.
+    Returns tidy df: [date, z].
+    """
+    out = df.copy()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out = out.dropna(subset=["date", a, b])
+    if out.empty:
+        return pd.DataFrame(columns=["date", "z"])
+    s = np.log(out[a].astype(float)) - np.log(out[b].astype(float))
+    mu = float(s.mean())
+    sd = float(s.std(ddof=0)) if float(s.std(ddof=0)) != 0 else 1e-12
+    z = (s - mu) / sd
+    return pd.DataFrame({"date": out["date"].to_numpy(), "z": z.to_numpy()})
+
+def view_relative_zscore():
+    st.subheader("Relative Z-Score (Pair)")
+
+    c1, c2, c3 = st.columns([1.2, 1.2, 0.6])
+    with c1:
+        t_a = st.text_input("Security A (Yahoo Finance symbol)", value="SRUUF", key="rz_a")
+    with c2:
+        t_b = st.text_input("Security B (Yahoo Finance symbol)", value="URA", key="rz_b")
+    with c3:
+        yrs = st.number_input("Years", min_value=1, max_value=30, value=5, step=1, key="rz_years")
+
+    if not t_a or not t_b:
+        return
+
+    pair = _pair_history(t_a, t_b, years=int(yrs))
+    if pair.empty:
+        st.info("No overlapping history for the selected pair.")
+        return
+
+    zdf = _log_spread_z(pair, t_a.upper(), t_b.upper())
+    if zdf.empty:
+        st.info("Unable to compute z-score for the selected pair.")
+        return
+
+    # latest reading
+    z_latest = float(zdf["z"].iloc[-1])
+    dt_latest = pd.to_datetime(zdf["date"].iloc[-1]).date()
+
+    # Altair chart with mean and ±1/±2 bands
+    import altair as alt
+    base = alt.Chart(zdf).encode(x=alt.X("date:T", title="Date"))
+
+    line = base.mark_line().encode(
+        y=alt.Y("z:Q", title=f"Z-Score of ln({t_a.upper()}) − ln({t_b.upper()})"),
+        tooltip=[alt.Tooltip("date:T"), alt.Tooltip("z:Q", title="z", format=".2f")],
+    )
+
+    rules = alt.Chart(
+        pd.DataFrame({"y": [0, 1, -1, 2, -2]})
+    ).mark_rule(strokeDash=[4, 4]).encode(y="y:Q")
+
+    labels = alt.Chart(
+        pd.DataFrame({"y": [2, -2], "text": ["+2σ", "−2σ"]})
+    ).mark_text(
+        dx=4, dy=-4, align="left"
+    ).encode(y="y:Q", text="text:N")
+
+    st.altair_chart((line + rules + labels).properties(height=420), use_container_width=True)
+
+    # Status strip
+    cL, cR = st.columns([1, 2])
+    with cL:
+        st.metric("Latest z-score", f"{z_latest:.2f}", help=f"As of {dt_latest}")
+    with cR:
+        st.caption("Bands shown: mean (0), ±1σ, ±2σ. Spread defined as ln(A) − ln(B).")
+
+
+
+
+
+
 # Router for Market Analytics
 # Replace the whole function
 def show_market_analytics():
     _page_header("Market Analytics", [
         "This section will feature market analytics, statistics etc. to feed the AI brain with context on the market so as to improve the reasoning",
         "Market Memory Explorer: compare current YTD path to similar historical years.",
-        "Monthly Seasonality Explorer: median, range, and hit‑rate by calendar month.",
+        "Monthly Seasonality Explorer: median, range, and hit-rate by calendar month.",
         "Controls persist across both views for a single chosen ticker."
     ])
 
-    # Shared controls for BOTH views
-    c1, c2, c3 = st.columns([2,1,1])
-    with c1:
-        ticker = st.text_input("Ticker (Yahoo Finance)", value="SPY", key="ma_ticker")
-    with c2:
-        start_year = st.number_input("Start Year", min_value=1900, max_value=datetime.now().year, value=2020, key="ma_start")
-    with c3:
-        k = st.slider("Similar years (for Market Memory)", min_value=3, max_value=10, value=5, key="ma_k")
+    tabs = st.tabs(["Seasonality & Market Memory", "Relative Z-Score (Pair)"])
 
-    if not ticker:
-        return
+    # --- Tab 1: Seasonality & Market Memory ---
+    with tabs[0]:
+        c1, c2, c3 = st.columns([2,1,1])
+        with c1:
+            ticker = st.text_input("Ticker (Yahoo Finance)", value="SPY", key="ma_ticker")
+        with c2:
+            start_year = st.number_input("Start Year", min_value=1900, max_value=datetime.now().year, value=2020, key="ma_start")
+        with c3:
+            k = st.slider("Similar years (for Market Memory)", min_value=3, max_value=10, value=5, key="ma_k")
 
-    # Render both views on the same page with the same security
-    view_market_memory(ticker_override=ticker, start_year_override=start_year, k_override=k)
-    st.markdown("---")
-    view_monthly_seasonality(ticker_override=ticker, start_year_override=start_year)
+        if ticker:
+            view_market_memory(ticker_override=ticker, start_year_override=start_year, k_override=k)
+            st.markdown("---")
+            view_monthly_seasonality(ticker_override=ticker, start_year_override=start_year)
+
+    # --- Tab 2: Relative Z-Score (Pair) ---
+    with tabs[1]:
+        # Expects you to have defined view_relative_zscore() separately.
+        view_relative_zscore()
 
 
 # ---- Main ----
