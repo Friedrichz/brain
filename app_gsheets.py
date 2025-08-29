@@ -1672,15 +1672,12 @@ def show_fund_monitor() -> None:
     selected_canonical_id = canonical_funds.loc[
         canonical_funds["canonical_name"] == fund_choice, "canonical_id"
     ].iloc[0]
-    st.info(selected_canonical_id)
 
     # ========= Fund slice =========
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
     fund_df = df[df.get("fund_id", pd.Series(dtype=str)).astype(str) == str(selected_canonical_id)].copy()
-
-    st.info(fund_df.shape)
     # ========= Tabs =========
     tabs = st.tabs(["Overview", "Portfolio Exposures", "Manager Updates", "Quant", "Newsflow"])
 
@@ -1898,6 +1895,8 @@ def show_fund_monitor() -> None:
     # --------------------------------
     # Tab 2: Portfolio Exposures  (everything except historical AUM/returns)
     # --------------------------------
+    # ===== replace the entire Tab 2 block inside show_fund_monitor() starting at:
+    # with tabs[1]:
     with tabs[1]:
         # ensure the name exists for all code paths
         filtered_row = pd.DataFrame()
@@ -1920,104 +1919,126 @@ def show_fund_monitor() -> None:
                     else:
                         filtered_row = fund_df[(fund_df["date"] == date_choice)]
 
-        # guard and early-exit within this tab
+        # headline
         if filtered_row.empty:
             st.info("No records found for the selected date and file type.")
             mcols = st.columns(5)
             for i, lab in enumerate(["AUM", "Net", "Gross", "Long", "Short"]):
                 mcols[i].metric(lab, "-")
-        else:
-            row = filtered_row.iloc[0]
+            # even if empty, stop here
+            st.stop()
 
-            # headline metrics
-            mcols = st.columns(5)
-            mcols[0].metric("AUM", row.get("aum_fund") or row.get("aum_firm"))
-            mcols[1].metric("Net", row.get("net"))
-            mcols[2].metric("Gross", row.get("gross"))
-            mcols[3].metric("Long", row.get("long"))
-            mcols[4].metric("Short", row.get("short"))
+        row = filtered_row.iloc[0]
+        mcols = st.columns(5)
+        mcols[0].metric("AUM", row.get("aum_fund") or row.get("aum_firm"))
+        mcols[1].metric("Net", row.get("net"))
+        mcols[2].metric("Gross", row.get("gross"))
+        mcols[3].metric("Long", row.get("long"))
+        mcols[4].metric("Short", row.get("short"))
 
-        st.markdown("**Top 10 Positions**")
-        try:
-            letters = _load_letters()
-        except Exception:
-            letters = pd.DataFrame()
-        if (
-            letters.empty
-            or not {"fund_id", "report_date", "position_ticker", "position_weight_percent"} <= set(letters.columns)
-        ):
-            st.info("No positions available.")
-        else:
-            dfp = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
-            dfp["report_date"] = pd.to_datetime(dfp["report_date"], errors="coerce")
-            if dfp.empty or dfp["report_date"].dropna().empty:
-                st.info("No positions available.")
-            else:
-                latest_rd = dfp["report_date"].max()
-                dfp = dfp[dfp["report_date"] == latest_rd].copy()
-                for c in ["position_name", "position_sector"]:
-                    if c not in dfp.columns:
-                        dfp[c] = None
-                view = dfp[
-                    ["position_name", "position_ticker", "position_sector", "position_weight_percent"]
-                ].rename(
-                    columns={
-                        "position_name": "Position Name",
-                        "position_ticker": "Position Ticker",
-                        "position_sector": "Position Sector",
-                        "position_weight_percent": "Position Weight (%)",
-                    }
-                ).copy()
-                view["Position Weight (%)"] = pd.to_numeric(view["Position Weight (%)"], errors="coerce")
-                view = (
-                    view.dropna(subset=["Position Ticker"])
-                    .sort_values("Position Weight (%)", ascending=False)
-                    .head(10)
+        # ---------- helpers specific to exposure tables ----------
+        def _exposure_table(df_raw: pd.DataFrame, kind: str) -> tuple[pd.DataFrame, pd.io.formats.style.Styler]:
+            """
+            - df_raw has index = category, columns = [<kind>_long, <kind>_short, <kind>_gross, <kind>_net]
+            - strip 'sector_'/'geo_' prefixes from columns
+            - coerce numeric, center numeric text, bold 'net'
+            - add 'Total' row with sums
+            """
+            # rename columns to drop prefixes
+            df = df_raw.copy()
+            df.index.name = None
+            df.columns = [c.replace(f"{kind}_", "") for c in df.columns]
+
+            # ensure numeric
+            for c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+
+            # append Total row
+            total = pd.DataFrame(df.sum(numeric_only=True)).T
+            total.index = ["Total"]
+            df_final = pd.concat([df, total], axis=0)
+
+            # style: center numeric, bold 'net'
+            sty = (
+                df_final.style
+                .format("{:.2f}%")
+                .set_properties(**{"text-align": "center"})
+                .set_properties(subset=pd.IndexSlice[:, ["net"]], **{"font-weight": "bold"})
+            )
+            return df_final, sty
+
+        def _net_bar(df_raw: pd.DataFrame, kind: str, title: str):
+            """
+            Bar plot on <kind>_net sorted desc.
+            """
+            import altair as alt
+            df = df_raw.copy()
+            # column may be missing; guard
+            net_col = f"{kind}_net"
+            if net_col not in df.columns:
+                return
+            tmp = (
+                df[[net_col]]
+                .reset_index()
+                .rename(columns={"index": "bucket", net_col: "net"})
+            )
+            tmp["net"] = pd.to_numeric(tmp["net"], errors="coerce")
+            tmp = tmp.dropna().sort_values("net", ascending=False)
+
+            if tmp.empty:
+                return
+
+            ch = (
+                alt.Chart(tmp)
+                .mark_bar()
+                .encode(
+                    x=alt.X("bucket:N", sort=tmp["bucket"].tolist(), title=None),
+                    y=alt.Y("net:Q", title="Net (%)"),
+                    tooltip=[alt.Tooltip("bucket:N", title="Bucket"),
+                            alt.Tooltip("net:Q", title="Net", format=".2f")]
                 )
-                st.dataframe(_fm_arrow_safe(view), use_container_width=True)
+                .properties(height=240, title=title)
+            )
+            st.altair_chart(ch, use_container_width=True)
 
-        # exposures tables
-        if not filtered_row.empty:
-            st.subheader("Exposures")
-            sector_keys = ["sector_long", "sector_short", "sector_gross", "sector_net"]
-            geo_keys = ["geo_long", "geo_short", "geo_gross", "geo_net"]
-            ec1, ec2 = st.columns(2)
-            if all(k in row.index for k in sector_keys):
-                with ec1:
-                    st.markdown("**Sector Exposures**")
-                    try:
-                        sector_df = build_exposure_df(row, sector_keys)
-                        tbl = _format_exposure_table(sector_df)
-                        st.dataframe(_fm_arrow_safe(tbl), use_container_width=True)
-                    except Exception:
-                        sector_df = build_exposure_df(row, sector_keys)
-                        st.dataframe(_fm_arrow_safe(sector_df), use_container_width=True)
-            if all(k in row.index for k in geo_keys):
-                with ec2:
-                    st.markdown("**Geographical Exposures**")
-                    try:
-                        geo_df = build_exposure_df(row, geo_keys)
-                        tbl = _format_exposure_table(geo_df)
-                        st.dataframe(_fm_arrow_safe(tbl), use_container_width=True)
-                    except Exception:
-                        geo_df = build_exposure_df(row, geo_keys)
-                        st.dataframe(_fm_arrow_safe(geo_df), use_container_width=True)
+        # ---------- Exposures + charts ----------
+        st.subheader("Exposures")
+
+        sector_keys = ["sector_long", "sector_short", "sector_gross", "sector_net"]
+        geo_keys    = ["geo_long",    "geo_short",    "geo_gross",    "geo_net"]
+
+        ec1, ec2 = st.columns(2)
+
+        # Sector
+        if all(k in row.index for k in sector_keys):
+            with ec1:
+                sector_df = build_exposure_df(row, sector_keys)
+                _net_bar(sector_df, "sector", "Sector — Net Exposure")
+                df_sec, sty_sec = _exposure_table(sector_df, "sector")
+                # scrollable to avoid cut-off
+                st.dataframe(sty_sec, use_container_width=True, height=420)
+
+        # Geo
+        if all(k in row.index for k in geo_keys):
+            with ec2:
+                geo_df = build_exposure_df(row, geo_keys)
+                _net_bar(geo_df, "geo", "Geography — Net Exposure")
+                df_geo, sty_geo = _exposure_table(geo_df, "geo")
+                st.dataframe(sty_geo, use_container_width=True, height=420)
 
         st.markdown("---")
         st.markdown("### Historical Net/Gross")
 
+        # side-by-side: left = chart, right = Top 10 positions
         ng1, ng2 = st.columns(2)
+
         with ng1:
-            # net/gross time series (kept here; AUM/returns moved to Overview)
             if {"date", "net", "gross"} <= set(fund_df.columns):
                 hist_df = fund_df[["date", "net", "gross"]].copy()
                 hist_df["date"] = pd.to_datetime(hist_df["date"], errors="coerce")
                 hist_df["net"] = hist_df["net"].apply(_fm_percent_to_float)
                 hist_df["gross"] = hist_df["gross"].apply(_fm_percent_to_float)
-                hist_df = (
-                    hist_df.dropna(subset=["date", "net", "gross"])
-                    .sort_values("date")
-                )
+                hist_df = hist_df.dropna(subset=["date", "net", "gross"]).sort_values("date")
                 if not hist_df.empty:
                     ch = (
                         alt.Chart(hist_df)
@@ -2027,15 +2048,54 @@ def show_fund_monitor() -> None:
                             x=alt.X("date:T", title="Date"),
                             y=alt.Y("Value:Q", title="Exposure"),
                             color=alt.Color("Exposure:N", title="Type"),
-                            tooltip=[
-                                alt.Tooltip("date:T"),
-                                alt.Tooltip("Exposure:N"),
-                                alt.Tooltip("Value:Q"),
-                            ],
+                            tooltip=[alt.Tooltip("date:T"),
+                                    alt.Tooltip("Exposure:N"),
+                                    alt.Tooltip("Value:Q")]
                         )
                         .properties(height=350)
                     )
                     st.altair_chart(ch, use_container_width=True)
+
+        with ng2:
+            st.markdown("**Top 10 Positions**")
+            try:
+                letters = _load_letters()
+            except Exception:
+                letters = pd.DataFrame()
+            if (
+                letters.empty
+                or not {"fund_id", "report_date", "position_ticker", "position_weight_percent"} <= set(letters.columns)
+            ):
+                st.info("No positions available.")
+            else:
+                dfp = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
+                dfp["report_date"] = pd.to_datetime(dfp["report_date"], errors="coerce")
+                if dfp.empty or dfp["report_date"].dropna().empty:
+                    st.info("No positions available.")
+                else:
+                    latest_rd = dfp["report_date"].max()
+                    dfp = dfp[dfp["report_date"] == latest_rd].copy()
+                    for c in ["position_name", "position_sector"]:
+                        if c not in dfp.columns:
+                            dfp[c] = None
+                    view = dfp[
+                        ["position_name", "position_ticker", "position_sector", "position_weight_percent"]
+                    ].rename(
+                        columns={
+                            "position_name": "Position Name",
+                            "position_ticker": "Position Ticker",
+                            "position_sector": "Position Sector",
+                            "position_weight_percent": "Position Weight (%)",
+                        }
+                    ).copy()
+                    view["Position Weight (%)"] = pd.to_numeric(view["Position Weight (%)"], errors="coerce")
+                    view = (
+                        view.dropna(subset=["Position Ticker"])
+                        .sort_values("Position Weight (%)", ascending=False)
+                        .head(10)
+                    )
+                    st.dataframe(_fm_arrow_safe(view), use_container_width=True, height=350)
+
 
     # --------------------------------
     # Tab 3: Manager Updates
