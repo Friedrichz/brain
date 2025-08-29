@@ -1612,6 +1612,15 @@ def _load_fund_news() -> pd.DataFrame:
     return df
 
 
+# ADD near other helpers (below _format_exposure_table)
+def _full_table_height(df: pd.DataFrame, *, row_px: int = 34, header_px: int = 40, pad_px: int = 24) -> int:
+    """
+    Compute a dataframe height that fits the whole table without scrollbars.
+    Works with either a DataFrame or a Styler (uses underlying .data).
+    """
+    base = getattr(df, "data", df)  # Styler -> underlying DataFrame
+    nrows = int(getattr(base, "shape", (0, 0))[0])
+    return int(header_px + nrows * row_px + pad_px)
 
 # ---------- public entry: call this from main router ----------
 def show_fund_monitor() -> None:
@@ -2012,19 +2021,42 @@ def show_fund_monitor() -> None:
         # Sector
         if all(k in row.index for k in sector_keys):
             with ec1:
-                sector_df = build_exposure_df(row, sector_keys)
-                _net_bar(sector_df, "sector", "Sector — Net Exposure")
-                df_sec, sty_sec = _exposure_table(sector_df, "sector")
-                # scrollable to avoid cut-off
-                st.dataframe(sty_sec, use_container_width=True, height=420)
+                st.markdown("**Sector Exposures**")
+                try:
+                    sector_df = build_exposure_df(row, sector_keys)
+                    tbl = _format_exposure_table(sector_df)  # returns a Styler
+                    st.dataframe(
+                        tbl,
+                        use_container_width=True,
+                        height=_full_table_height(tbl)
+                    )
+                except Exception:
+                    sector_df = build_exposure_df(row, sector_keys)
+                    st.dataframe(
+                        sector_df,
+                        use_container_width=True,
+                        height=_full_table_height(sector_df)
+                    )
 
         # Geo
         if all(k in row.index for k in geo_keys):
             with ec2:
-                geo_df = build_exposure_df(row, geo_keys)
-                _net_bar(geo_df, "geo", "Geography — Net Exposure")
-                df_geo, sty_geo = _exposure_table(geo_df, "geo")
-                st.dataframe(sty_geo, use_container_width=True, height=420)
+                st.markdown("**Geographical Exposures**")
+                try:
+                    geo_df = build_exposure_df(row, geo_keys)
+                    tbl = _format_exposure_table(geo_df)  # returns a Styler
+                    st.dataframe(
+                        tbl,
+                        use_container_width=True,
+                        height=_full_table_height(tbl)
+                    )
+                except Exception:
+                    geo_df = build_exposure_df(row, geo_keys)
+                    st.dataframe(
+                        geo_df,
+                        use_container_width=True,
+                        height=_full_table_height(geo_df)
+                    )
 
         st.markdown("---")
         st.markdown("### Historical Net/Gross")
