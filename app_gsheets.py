@@ -2666,7 +2666,6 @@ def _rolling_rel_perf(pair: pd.DataFrame, a: str, b: str, window: int = 90) -> p
     rel = (ra - rb).rolling(window).sum()  # trailing perf diff
     return pd.DataFrame({"date": out["date"], "rel": rel})
 
-
 # --- helpers (keep existing _pair_history, _log_spread_z, _rolling_rel_perf) ---
 
 def _rel_return_window(pair: pd.DataFrame, a_col: str, b_col: str, start_ts: pd.Timestamp) -> float | None:
