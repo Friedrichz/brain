@@ -1381,6 +1381,9 @@ def _split_bullets(text: str) -> list[str]:
 def _format_exposure_table(df: pd.DataFrame) -> Styler:
     out = df.copy()
     out.index = out.index.astype(str).str.strip().str.strip('"').str.strip("'")
+    # remove "sector_" / "geo_" prefixes
+    out.columns = [c.replace("sector_", "").replace("geo_", "") for c in out.columns]
+
     for c in out.columns:
         out[c] = pd.to_numeric(out[c], errors="coerce")
 
