@@ -2637,7 +2637,6 @@ def _pair_history(t1: str, t2: str, *, use_max: bool = True, years: int = 5) -> 
         return pd.DataFrame(columns=["date"] + tickers)
     return w[cols].reset_index().rename(columns={cols[0]: tickers[0], cols[1]: tickers[1]})
 
-
 def _log_spread_z(df: pd.DataFrame, a: str, b: str) -> pd.DataFrame:
     """
     Compute z-score of S_t = ln(A_t) - ln(B_t) across the full window.
@@ -2653,6 +2652,55 @@ def _log_spread_z(df: pd.DataFrame, a: str, b: str) -> pd.DataFrame:
     sd = float(s.std(ddof=0)) if float(s.std(ddof=0)) != 0 else 1e-12
     z = (s - mu) / sd
     return pd.DataFrame({"date": out["date"].to_numpy(), "z": z.to_numpy()})
+
+
+def _rolling_rel_perf(pair: pd.DataFrame, a: str, b: str, window: int = 90) -> pd.DataFrame:
+    """Compute rolling relative return variance of A vs B over trailing window."""
+    out = pair.copy()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out = out.dropna(subset=["date", a, b]).sort_values("date")
+    if out.empty:
+        return pd.DataFrame(columns=["date","rel"])
+    ra = out[a].pct_change()
+    rb = out[b].pct_change()
+    rel = (ra - rb).rolling(window).sum()  # trailing perf diff
+    return pd.DataFrame({"date": out["date"], "rel": rel})
+
+def view_relative_performance():
+    st.subheader("Relative Performance (Price + 90d trailing)")
+
+    t_a = st.text_input("Security A", value="GDX", key="rp_a")
+    t_b = st.text_input("Security B", value="GLD", key="rp_b")
+
+    if not t_a or not t_b:
+        return
+
+    pair = _pair_history(t_a, t_b, use_max=True)
+    if pair.empty:
+        st.info("No overlapping history.")
+        return
+    a_col, b_col = t_a.upper(), t_b.upper()
+
+    # 1) Dual-axis price chart
+    fig, ax1 = plt.subplots(figsize=(10,5), dpi=120)
+    ax2 = ax1.twinx()
+    ax1.plot(pair["date"], pair[a_col], color="tab:blue", label=a_col)
+    ax2.plot(pair["date"], pair[b_col], color="tab:orange", label=b_col)
+    ax1.set_ylabel(a_col, color="tab:blue")
+    ax2.set_ylabel(b_col, color="tab:orange")
+    ax1.set_title(f"{a_col} vs {b_col} prices")
+    st.pyplot(fig, clear_figure=True)
+
+    # 2) 90-day trailing perf diff
+    roll = _rolling_rel_perf(pair, a_col, b_col, 90)
+    if not roll.empty:
+        fig2, ax = plt.subplots(figsize=(10,4), dpi=120)
+        ax.bar(roll["date"], roll["rel"]*100, width=10, color="gray")
+        ax.axhline(0, color="black", linewidth=1)
+        ax.set_ylabel(f"{a_col}−{b_col} 90d return diff (%)")
+        ax.set_title("90-day trailing performance A vs B")
+        st.pyplot(fig2, clear_figure=True)
+
 
 def view_relative_zscore():
     st.subheader("Relative Z-Score (Pair)")
@@ -2681,7 +2729,7 @@ def view_relative_zscore():
     z_latest = float(zdf["z"].iloc[-1])
     dt_latest = pd.to_datetime(zdf["date"].iloc[-1]).date()
     
-     # === Relative performance scorecards ===
+    # === Relative performance scorecards ===
     st.markdown("### Relative Performance A vs B")
 
     pair["date"] = pd.to_datetime(pair["date"], errors="coerce")
@@ -2712,72 +2760,78 @@ def view_relative_zscore():
         "1Y": rel_return(pair, start_1y),
     }
 
-    c1, c2, c3, c4 = st.columns(4)
-    for c, (lab, val) in zip([c1,c2,c3,c4], metrics.items()):
-        txt = f"{val:.2f}%" if val is not None else "-"
-        c.metric(label=lab, value=txt)
+    ac1, ac2 = st.columns(2)
+
+    with ac1:
+        view_relative_performance()
+
+    with ac2:
+        c1, c2, c3, c4 = st.columns(4)
+        for c, (lab, val) in zip([c1,c2,c3,c4], metrics.items()):
+            txt = f"{val:.2f}%" if val is not None else "-"
+            c.metric(label=lab, value=txt)
 
 
-    import altair as alt
-    base = alt.Chart(zdf).encode(
-        x=alt.X(
-            "date:T",
-            title="Date",
-            axis=alt.Axis(format="%b %Y", labelAngle=-30, labelOverlap=False),
-            scale=alt.Scale(nice="year")
+        import altair as alt
+        base = alt.Chart(zdf).encode(
+            x=alt.X(
+                "date:T",
+                title="Date",
+                axis=alt.Axis(format="%b %Y", labelAngle=-30, labelOverlap=False),
+                scale=alt.Scale(nice="year")
+            )
         )
-    )
 
-    line = base.mark_line().encode(
-        y=alt.Y("z:Q", title=f"Z-Score of ln({t_a.upper()}) − ln({t_b.upper()})"),
-        tooltip=[alt.Tooltip("date:T"), alt.Tooltip("z:Q", title="z", format=".2f")],
-    )
-
-    # reference lines with labels
-    # --- reference lines with labels (force re-render per selection) ---
-    # Keep the lines expressed in z-units; recompute and re-render on every ticker change.
-    ref_levels = pd.DataFrame({
-        "y": [-2, -1, 0, 1, 2],
-        "label": ["−2σ", "−1σ", "μ", "+1σ", "+2σ"],
-    })
-
-    last_date = pd.to_datetime(zdf["date"].max(), errors="coerce")
-    ref_levels_lbl = ref_levels.assign(date=last_date)
-
-    rules = (
-        alt.Chart(ref_levels)
-        .mark_rule(strokeDash=[4, 4], color="#999")
-        .encode(y="y:Q")
-    )
-
-    labels = (
-        alt.Chart(ref_levels_lbl)
-        .mark_text(align="left", dx=6, dy=-6, fontSize=11, fontWeight="bold", color="#444")
-        .encode(
-            x=alt.X("date:T"),
-            y=alt.Y("y:Q"),
-            text="label:N",
+        line = base.mark_line().encode(
+            y=alt.Y("z:Q", title=f"Z-Score of ln({t_a.upper()}) − ln({t_b.upper()})"),
+            tooltip=[alt.Tooltip("date:T"), alt.Tooltip("z:Q", title="z", format=".2f")],
         )
-    )
 
-    chart = (line + rules + labels).properties(height=360)
+        # reference lines with labels
+        # --- reference lines with labels (force re-render per selection) ---
+        # Keep the lines expressed in z-units; recompute and re-render on every ticker change.
+        ref_levels = pd.DataFrame({
+            "y": [-2, -1, 0, 1, 2],
+            "label": ["−2σ", "−1σ", "μ", "+1σ", "+2σ"],
+        })
 
-    # Force Streamlit to treat each parameter set as a distinct widget to avoid stale overlays.
-    chart_key = f"rz_chart_{t_a.upper()}_{t_b.upper()}_{int(bool(use_max))}_{int(yrs)}"
-    st.altair_chart(chart, use_container_width=True, key=chart_key)
+        last_date = pd.to_datetime(zdf["date"].max(), errors="coerce")
+        ref_levels_lbl = ref_levels.assign(date=last_date)
 
-    # quick readout and interpretation
-    st.metric(label="Latest z", value=f"{z_latest:.2f}", help=f"As of {dt_latest}")
-    if z_latest >= 2:
-        st.caption("Context: > +2σ — extreme positive spread relative to its historical mean.")
-    elif z_latest >= 1:
-        st.caption("Context: between +1σ and +2σ — meaningfully above mean; revert/mean-reversion setups often evaluated here.")
-    elif z_latest > -1 and z_latest < 1:
-        st.caption("Context: between −1σ and +1σ — near mean (μ); low signal.")
-    elif z_latest <= -2:
-        st.caption("Context: < −2σ — extreme negative spread relative to its historical mean.")
-    else:  # between -2 and -1
-        st.caption("Context: between −1σ and −2σ — meaningfully below mean; revert/mean-reversion setups often evaluated here.")
+        rules = (
+            alt.Chart(ref_levels)
+            .mark_rule(strokeDash=[4, 4], color="#999")
+            .encode(y="y:Q")
+        )
+
+        labels = (
+            alt.Chart(ref_levels_lbl)
+            .mark_text(align="left", dx=6, dy=-6, fontSize=11, fontWeight="bold", color="#444")
+            .encode(
+                x=alt.X("date:T"),
+                y=alt.Y("y:Q"),
+                text="label:N",
+            )
+        )
+
+        chart = (line + rules + labels).properties(height=360)
+
+        # Force Streamlit to treat each parameter set as a distinct widget to avoid stale overlays.
+        chart_key = f"rz_chart_{t_a.upper()}_{t_b.upper()}_{int(bool(use_max))}_{int(yrs)}"
+        st.altair_chart(chart, use_container_width=True, key=chart_key)
+
+        # quick readout and interpretation
+        st.metric(label="Latest z", value=f"{z_latest:.2f}", help=f"As of {dt_latest}")
+        if z_latest >= 2:
+            st.caption("Context: > +2σ — extreme positive spread relative to its historical mean.")
+        elif z_latest >= 1:
+            st.caption("Context: between +1σ and +2σ — meaningfully above mean; revert/mean-reversion setups often evaluated here.")
+        elif z_latest > -1 and z_latest < 1:
+            st.caption("Context: between −1σ and +1σ — near mean (μ); low signal.")
+        elif z_latest <= -2:
+            st.caption("Context: < −2σ — extreme negative spread relative to its historical mean.")
+        else:  # between -2 and -1
+            st.caption("Context: between −1σ and −2σ — meaningfully below mean; revert/mean-reversion setups often evaluated here.")
 
     # # EVENT STUDY FORWARD LOOKING
     # st.markdown("### Forward performance after similar z")
