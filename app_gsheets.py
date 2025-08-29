@@ -2001,10 +2001,10 @@ def show_fund_monitor() -> None:
         def _net_bar(df_raw: pd.DataFrame, kind: str, title: str):
             """
             Bar plot on <kind>_net sorted desc.
+            Ensures consistent bar width across sector and geo charts.
             """
             import altair as alt
             df = df_raw.copy()
-            # column may be missing; guard
             net_col = f"{kind}_net"
             if net_col not in df.columns:
                 return
@@ -2015,7 +2015,6 @@ def show_fund_monitor() -> None:
             )
             tmp["net"] = pd.to_numeric(tmp["net"], errors="coerce")
             tmp = tmp.dropna().sort_values("net", ascending=False)
-
             if tmp.empty:
                 return
 
@@ -2023,14 +2022,22 @@ def show_fund_monitor() -> None:
                 alt.Chart(tmp)
                 .mark_bar()
                 .encode(
-                    x=alt.X("bucket:N", sort=tmp["bucket"].tolist(), title=None),
+                    x=alt.X(
+                        "bucket:N",
+                        sort=tmp["bucket"].tolist(),
+                        title=None,
+                        scale=alt.Scale(bandPaddingInner=0.1, bandPaddingOuter=0.05)  # fixes bar width
+                    ),
                     y=alt.Y("net:Q", title="Net (%)"),
-                    tooltip=[alt.Tooltip("bucket:N", title="Bucket"),
-                            alt.Tooltip("net:Q", title="Net", format=".2f")]
+                    tooltip=[
+                        alt.Tooltip("bucket:N", title="Bucket"),
+                        alt.Tooltip("net:Q", title="Net", format=".2f")
+                    ],
                 )
                 .properties(height=240, title=title)
             )
             st.altair_chart(ch, use_container_width=True)
+
 
         # ---------- Exposures + charts ----------
         st.subheader("Exposures")
