@@ -1383,11 +1383,30 @@ def _format_exposure_table(df: pd.DataFrame) -> Styler:
     out.index = out.index.astype(str).str.strip().str.strip('"').str.strip("'")
     for c in out.columns:
         out[c] = pd.to_numeric(out[c], errors="coerce")
+
+    # append "Total" row with sums
+    total = pd.DataFrame(out.sum(numeric_only=True)).T
+    total.index = ["Total"]
+    out = pd.concat([out, total], axis=0)
+
     net_cols = [c for c in out.columns if c.endswith("_net")]
-    styler = out.style.format("{:.2f}%")
+    styler = (
+        out.style
+        .format("{:.2f}%")
+        .set_properties(**{"text-align": "center"})
+    )
     if net_cols:
-        styler = styler.set_properties(subset=pd.IndexSlice[:, [net_cols[-1]]], **{"font-weight": "bold"})
+        styler = styler.set_properties(
+            subset=pd.IndexSlice[:, [net_cols[-1]]],
+            **{"font-weight": "bold"}
+        )
+    # make entire Total row bold
+    styler = styler.set_properties(
+        subset=pd.IndexSlice["Total", :],
+        **{"font-weight": "bold"}
+    )
     return styler
+
 
 
 # ======== show_fund_monitor()  ========
@@ -2022,6 +2041,9 @@ def show_fund_monitor() -> None:
         if all(k in row.index for k in sector_keys):
             with ec1:
                 st.markdown("**Sector Exposures**")
+                # Build once, plot bar, then table
+                sector_df = build_exposure_df(row, sector_keys)
+                _net_bar(sector_df, "sector", "Net by Sector")  # ← add bar chart above table
                 try:
                     sector_df = build_exposure_df(row, sector_keys)
                     tbl = _format_exposure_table(sector_df)  # returns a Styler
@@ -2042,6 +2064,9 @@ def show_fund_monitor() -> None:
         if all(k in row.index for k in geo_keys):
             with ec2:
                 st.markdown("**Geographical Exposures**")
+                # Build once, plot bar, then table
+                geo_df = build_exposure_df(row, geo_keys)
+                _net_bar(geo_df, "geo", "Net by Geography")  # ← add bar chart above table
                 try:
                     geo_df = build_exposure_df(row, geo_keys)
                     tbl = _format_exposure_table(geo_df)  # returns a Styler
