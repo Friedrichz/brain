@@ -2001,13 +2001,14 @@ def show_fund_monitor() -> None:
         def _net_bar(df_raw: pd.DataFrame, kind: str, title: str):
             """
             Bar plot on <kind>_net sorted desc.
-            Ensures consistent bar width across sector and geo charts.
+            Uses fixed step width and consistent band paddings so bars match across charts.
             """
             import altair as alt
             df = df_raw.copy()
             net_col = f"{kind}_net"
             if net_col not in df.columns:
                 return
+
             tmp = (
                 df[[net_col]]
                 .reset_index()
@@ -2026,7 +2027,7 @@ def show_fund_monitor() -> None:
                         "bucket:N",
                         sort=tmp["bucket"].tolist(),
                         title=None,
-                        scale=alt.Scale(bandPaddingInner=0.1, bandPaddingOuter=0.05)  # fixes bar width
+                        scale=alt.Scale(paddingInner=0.1, paddingOuter=0.05)
                     ),
                     y=alt.Y("net:Q", title="Net (%)"),
                     tooltip=[
@@ -2034,10 +2035,10 @@ def show_fund_monitor() -> None:
                         alt.Tooltip("net:Q", title="Net", format=".2f")
                     ],
                 )
-                .properties(height=240, title=title)
+                # Fixed per-category step makes bar thickness identical regardless of category count
+                .properties(height=240, width=alt.Step(24), title=title)
             )
             st.altair_chart(ch, use_container_width=True)
-
 
         # ---------- Exposures + charts ----------
         st.subheader("Exposures")
