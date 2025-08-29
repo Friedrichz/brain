@@ -1672,6 +1672,7 @@ def show_fund_monitor() -> None:
     selected_canonical_id = canonical_funds.loc[
         canonical_funds["canonical_name"] == fund_choice, "canonical_id"
     ].iloc[0]
+    st.info(selected_canonical_id)
 
     # ========= Fund slice =========
     if "date" in df.columns:
