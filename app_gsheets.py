@@ -2666,313 +2666,137 @@ def _rolling_rel_perf(pair: pd.DataFrame, a: str, b: str, window: int = 90) -> p
     rel = (ra - rb).rolling(window).sum()  # trailing perf diff
     return pd.DataFrame({"date": out["date"], "rel": rel})
 
-def view_relative_performance():
-    st.subheader("Relative Performance (Price + 90d trailing)")
 
-    t_a = st.text_input("Security A", value="GDX", key="rp_a")
-    t_b = st.text_input("Security B", value="GLD", key="rp_b")
+# --- helpers (keep existing _pair_history, _log_spread_z, _rolling_rel_perf) ---
 
-    if not t_a or not t_b:
-        return
+def _rel_return_window(pair: pd.DataFrame, a_col: str, b_col: str, start_ts: pd.Timestamp) -> float | None:
+    sub = pair[pair["date"] >= start_ts]
+    if sub.empty:
+        return None
+    a0, b0 = sub.iloc[0][a_col], sub.iloc[0][b_col]
+    a1, b1 = sub.iloc[-1][a_col], sub.iloc[-1][b_col]
+    if b0 <= 0 or b1 <= 0:
+        return None
+    r = (a1 / b1) / (a0 / b0) - 1.0
+    try:
+        return round(r * 100.0, 2)
+    except Exception:
+        return None
 
-    pair = _pair_history(t_a, t_b, use_max=True)
-    if pair.empty:
-        st.info("No overlapping history.")
-        return
-    a_col, b_col = t_a.upper(), t_b.upper()
-
-    # 1) Dual-axis price chart
-    fig, ax1 = plt.subplots(figsize=(10,5), dpi=120)
+def _plot_dual_axis_price(pair: pd.DataFrame, a_col: str, b_col: str):
+    fig, ax1 = plt.subplots(figsize=(10, 5), dpi=120)
     ax2 = ax1.twinx()
-    ax1.plot(pair["date"], pair[a_col], color="tab:blue", label=a_col)
-    ax2.plot(pair["date"], pair[b_col], color="tab:orange", label=b_col)
-    ax1.set_ylabel(a_col, color="tab:blue")
-    ax2.set_ylabel(b_col, color="tab:orange")
-    ax1.set_title(f"{a_col} vs {b_col} prices")
-    st.pyplot(fig, clear_figure=True)
+    ax1.plot(pair["date"], pair[a_col], label=a_col)
+    ax2.plot(pair["date"], pair[b_col], label=b_col)
+    ax1.set_ylabel(a_col)
+    ax2.set_ylabel(b_col)
+    ax1.set_title(f"{a_col} vs {b_col} — prices")
+    ax1.grid(True, alpha=0.2)
+    return fig
 
-    # 2) 90-day trailing perf diff
-    roll = _rolling_rel_perf(pair, a_col, b_col, 90)
+def _plot_rolling_rel_perf(pair: pd.DataFrame, a_col: str, b_col: str, window: int = 90):
+    roll = _rolling_rel_perf(pair, a_col, b_col, window)
+    fig, ax = plt.subplots(figsize=(10, 4), dpi=120)
     if not roll.empty:
-        fig2, ax = plt.subplots(figsize=(10,4), dpi=120)
-        ax.bar(roll["date"], roll["rel"]*100, width=10, color="gray")
-        ax.axhline(0, color="black", linewidth=1)
-        ax.set_ylabel(f"{a_col}−{b_col} 90d return diff (%)")
-        ax.set_title("90-day trailing performance A vs B")
-        st.pyplot(fig2, clear_figure=True)
+        ax.bar(roll["date"], roll["rel"] * 100, width=10)
+    ax.axhline(0, color="black", linewidth=1)
+    ax.set_ylabel(f"{a_col}−{b_col} {window}d return diff (%)")
+    ax.set_title(f"{window}-day trailing performance A vs B")
+    ax.grid(True, axis="y", alpha=0.2)
+    return fig
 
-
+# --- MAIN: rewrite the tab ---
 def view_relative_zscore():
     st.subheader("Relative Z-Score (Pair)")
 
-    c1, c2 = st.columns([1.2, 1])
+    # unified controls
+    c1, c2, c3 = st.columns([1.2, 0.9, 1])
     with c1:
         t_a = st.text_input("Security A (Yahoo Finance symbol)", value="URA", key="rz_a")
-        t_b = st.text_input("Security B (Yahoo Finance symbol)", value="SRUUF", key="rz_b")
     with c2:
-        use_max = st.checkbox("Use max available history", value=True, key="rz_use_max")
+        t_b = st.text_input("Security B (Yahoo Finance symbol)", value="SRUUF", key="rz_b")
+    with c3:
+        use_max = st.checkbox("Use max history", value=True, key="rz_use_max")
         yrs = st.number_input("Years (if not max)", min_value=1, max_value=30, value=5, step=1, key="rz_years", disabled=use_max)
 
     if not t_a or not t_b:
         return
 
+    # shared data for both columns
     pair = _pair_history(t_a, t_b, use_max=bool(use_max), years=int(yrs))
     if pair.empty:
         st.info("No overlapping history for the selected pair.")
         return
 
-    zdf = _log_spread_z(pair, t_a.upper(), t_b.upper())
+    a_col, b_col = t_a.upper(), t_b.upper()
+    pair["date"] = pd.to_datetime(pair["date"], errors="coerce")
+    pair = pair.dropna().sort_values("date")
+
+    zdf = _log_spread_z(pair, a_col, b_col)
     if zdf.empty:
         st.info("Unable to compute z-score for the selected pair.")
         return
-
     z_latest = float(zdf["z"].iloc[-1])
     dt_latest = pd.to_datetime(zdf["date"].iloc[-1]).date()
-    
-    # === Relative performance scorecards ===
-    st.markdown("### Relative Performance A vs B")
 
-    pair["date"] = pd.to_datetime(pair["date"], errors="coerce")
-    pair = pair.dropna().sort_values("date")
-    a_col, b_col = t_a.upper(), t_b.upper()
-
-    def rel_return(df, start):
-        sub = df[df["date"] >= start]
-        if sub.empty:
-            return None
-        a0, b0 = sub.iloc[0][a_col], sub.iloc[0][b_col]
-        a1, b1 = sub.iloc[-1][a_col], sub.iloc[-1][b_col]
-        if b0 <= 0 or b1 <= 0:
-            return None
-        r = (a1/b1) / (a0/b0) - 1.0
-        return round(r*100,2)
-
+    # precompute scorebox metrics once
     today = pair["date"].max().normalize()
-    start_mtd = today.replace(day=1)
-    start_ytd = today.replace(month=1, day=1)
-    start_6m = today - pd.DateOffset(months=6)
-    start_1y = today - pd.DateOffset(years=1)
-
     metrics = {
-        "MTD": rel_return(pair, start_mtd),
-        "6M": rel_return(pair, start_6m),
-        "YTD": rel_return(pair, start_ytd),
-        "1Y": rel_return(pair, start_1y),
+        "MTD": _rel_return_window(pair, a_col, b_col, today.replace(day=1)),
+        "6M": _rel_return_window(pair, a_col, b_col, today - pd.DateOffset(months=6)),
+        "YTD": _rel_return_window(pair, a_col, b_col, today.replace(month=1, day=1)),
+        "1Y": _rel_return_window(pair, a_col, b_col, today - pd.DateOffset(years=1)),
     }
 
-    ac1, ac2 = st.columns(2)
+    # layout: two columns, same underlying data
+    left, right = st.columns(2)
 
-    with ac1:
-        view_relative_performance()
+    # LEFT: prices + 90d trailing relative perf
+    with left:
+        st.markdown("**Price & Relative Performance**")
+        st.pyplot(_plot_dual_axis_price(pair, a_col, b_col), clear_figure=True)
+        st.pyplot(_plot_rolling_rel_perf(pair, a_col, b_col, window=90), clear_figure=True)
 
-    with ac2:
+    # RIGHT: scoreboxes + z-score plot
+    with right:
         c1, c2, c3, c4 = st.columns(4)
-        for c, (lab, val) in zip([c1,c2,c3,c4], metrics.items()):
+        for col, (lab, val) in zip([c1, c2, c3, c4], metrics.items()):
             txt = f"{val:.2f}%" if val is not None else "-"
-            c.metric(label=lab, value=txt)
-
+            col.metric(label=lab, value=txt)
 
         import altair as alt
         base = alt.Chart(zdf).encode(
-            x=alt.X(
-                "date:T",
-                title="Date",
-                axis=alt.Axis(format="%b %Y", labelAngle=-30, labelOverlap=False),
-                scale=alt.Scale(nice="year")
-            )
+            x=alt.X("date:T", title="Date",
+                    axis=alt.Axis(format="%b %Y", labelAngle=-30, labelOverlap=False),
+                    scale=alt.Scale(nice="year"))
         )
-
         line = base.mark_line().encode(
-            y=alt.Y("z:Q", title=f"Z-Score of ln({t_a.upper()}) − ln({t_b.upper()})"),
+            y=alt.Y("z:Q", title=f"Z-Score of ln({a_col}) − ln({b_col})"),
             tooltip=[alt.Tooltip("date:T"), alt.Tooltip("z:Q", title="z", format=".2f")],
         )
-
-        # reference lines with labels
-        # --- reference lines with labels (force re-render per selection) ---
-        # Keep the lines expressed in z-units; recompute and re-render on every ticker change.
-        ref_levels = pd.DataFrame({
-            "y": [-2, -1, 0, 1, 2],
-            "label": ["−2σ", "−1σ", "μ", "+1σ", "+2σ"],
-        })
-
+        ref_levels = pd.DataFrame({"y": [-2, -1, 0, 1, 2], "label": ["−2σ", "−1σ", "μ", "+1σ", "+2σ"]})
         last_date = pd.to_datetime(zdf["date"].max(), errors="coerce")
-        ref_levels_lbl = ref_levels.assign(date=last_date)
+        rules = alt.Chart(ref_levels).mark_rule(strokeDash=[4, 4], color="#999").encode(y="y:Q")
+        labels = alt.Chart(ref_levels.assign(date=last_date)).mark_text(
+            align="left", dx=6, dy=-6, fontSize=11, fontWeight="bold", color="#444"
+        ).encode(x="date:T", y="y:Q", text="label:N")
 
-        rules = (
-            alt.Chart(ref_levels)
-            .mark_rule(strokeDash=[4, 4], color="#999")
-            .encode(y="y:Q")
-        )
+        st.altair_chart((line + rules + labels).properties(height=360),
+                        use_container_width=True,
+                        key=f"rz_chart_{a_col}_{b_col}_{int(bool(use_max))}_{int(yrs)}")
 
-        labels = (
-            alt.Chart(ref_levels_lbl)
-            .mark_text(align="left", dx=6, dy=-6, fontSize=11, fontWeight="bold", color="#444")
-            .encode(
-                x=alt.X("date:T"),
-                y=alt.Y("y:Q"),
-                text="label:N",
-            )
-        )
-
-        chart = (line + rules + labels).properties(height=360)
-
-        # Force Streamlit to treat each parameter set as a distinct widget to avoid stale overlays.
-        chart_key = f"rz_chart_{t_a.upper()}_{t_b.upper()}_{int(bool(use_max))}_{int(yrs)}"
-        st.altair_chart(chart, use_container_width=True, key=chart_key)
-
-        # quick readout and interpretation
         st.metric(label="Latest z", value=f"{z_latest:.2f}", help=f"As of {dt_latest}")
         if z_latest >= 2:
-            st.caption("Context: > +2σ — extreme positive spread relative to its historical mean.")
+            st.caption("> +2σ — extreme positive spread.")
         elif z_latest >= 1:
-            st.caption("Context: between +1σ and +2σ — meaningfully above mean; revert/mean-reversion setups often evaluated here.")
-        elif z_latest > -1 and z_latest < 1:
-            st.caption("Context: between −1σ and +1σ — near mean (μ); low signal.")
+            st.caption("+1σ to +2σ — above mean.")
+        elif -1 < z_latest < 1:
+            st.caption("Near μ — low signal.")
         elif z_latest <= -2:
-            st.caption("Context: < −2σ — extreme negative spread relative to its historical mean.")
-        else:  # between -2 and -1
-            st.caption("Context: between −1σ and −2σ — meaningfully below mean; revert/mean-reversion setups often evaluated here.")
+            st.caption("< −2σ — extreme negative spread.")
+        else:
+            st.caption("−1σ to −2σ — below mean.")
 
-    # # EVENT STUDY FORWARD LOOKING
-    # st.markdown("### Forward performance after similar z")
-
-    # # controls
-    # tol = st.slider("Match tolerance (|z − z*|)", min_value=0.05, max_value=1.00, value=0.25, step=0.05, help="z* = latest z")
-    # horizon_td = st.slider("Forward window (trading days)", min_value=60, max_value=260, value=252, step=5)
-    # min_spacing = st.slider("Min spacing between events (days)", min_value=20, max_value=252, value=63, step=1)
-
-    # # prep series
-    # pair["date"] = pd.to_datetime(pair["date"], errors="coerce")
-    # px = pair.dropna().sort_values("date").set_index("date")
-    # a_col, b_col = t_a.upper(), t_b.upper()
-
-    # # match event dates (exclude last few days to avoid incomplete paths)
-    # zsr = zdf.dropna().copy()
-    # zsr["date"] = pd.to_datetime(zsr["date"], errors="coerce")
-    # zsr = zsr.set_index("date")["z"].sort_index()
-    # z_star = float(zsr.iloc[-1])
-
-    # candidates = zsr.index[(zsr - z_star).abs() <= float(tol)]
-    # candidates = candidates[candidates < (zsr.index[-1] - pd.Timedelta(days=5))]  # leave tail
-
-    # # enforce spacing
-    # events = []
-    # for d in candidates:
-    #     if not events or (d - events[-1]).days >= int(min_spacing):
-    #         events.append(d)
-    # events = pd.to_datetime(pd.Index(events))
-
-    # def forward_paths(df, col):
-    #     paths = []
-    #     for d in events:
-    #         # anchor = first trading day on/after event date
-    #         if d not in df.index:
-    #             nxt = df.index[df.index.get_indexer([d], method="backfill")]
-    #             if len(nxt) == 0:
-    #                 continue
-    #             d0 = nxt[0]
-    #         else:
-    #             d0 = d
-    #         seg = df.loc[d0:].iloc[:int(horizon_td)].copy()
-    #         if seg.empty:
-    #             continue
-    #         base = float(seg[col].iloc[0])
-    #         if base <= 0:
-    #             continue
-    #         seg = seg.assign(
-    #             t=np.arange(len(seg), dtype=int),
-    #             ret=(seg[col] / base - 1.0),
-    #             event=d0
-    #         )[["t", "ret", "event"]]
-    #         paths.append(seg)
-    #     if not paths:
-    #         return pd.DataFrame(columns=["t","ret","event"])
-    #     out = pd.concat(paths, ignore_index=True)
-    #     # mean path
-    #     avg = out.groupby("t", as_index=False)["ret"].mean().assign(event="AVERAGE")
-    #     return pd.concat([out, avg], ignore_index=True)
-
-    # # compute paths for A, B, and log-spread (A/B)
-    # paths_a = forward_paths(px, a_col)
-    # paths_b = forward_paths(px, b_col)
-
-    # # spread via log prices to match z definition
-    # logA = np.log(px[a_col].astype(float))
-    # logB = np.log(px[b_col].astype(float))
-    # px_spread = pd.DataFrame({"date": px.index, "S": (logA - logB).values}).set_index("date")
-
-    # def forward_paths_spread(df):
-    #     paths = []
-    #     for d in events:
-    #         if d not in df.index:
-    #             nxt = df.index[df.index.get_indexer([d], method="backfill")]
-    #             if len(nxt) == 0:
-    #                 continue
-    #             d0 = nxt[0]
-    #         else:
-    #             d0 = d
-    #         seg = df.loc[d0:].iloc[:int(horizon_td)].copy()
-    #         if seg.empty:
-    #             continue
-    #         base = float(seg["S"].iloc[0])
-    #         seg = seg.assign(
-    #             t=np.arange(len(seg), dtype=int),
-    #             ret=(seg["S"] - base),  # change in log-spread
-    #             event=d0
-    #         )[["t","ret","event"]]
-    #         paths.append(seg)
-    #     if not paths:
-    #         return pd.DataFrame(columns=["t","ret","event"])
-    #     out = pd.concat(paths, ignore_index=True)
-    #     avg = out.groupby("t", as_index=False)["ret"].mean().assign(event="AVERAGE")
-    #     return pd.concat([out, avg], ignore_index=True)
-
-    # paths_s = forward_paths_spread(px_spread)
-
-    # def plot_paths(df, title, is_pct: bool):
-    #     if df.empty:
-    #         st.info(f"No eligible events for {title.lower()}.")
-    #         return
-    #     base = alt.Chart(df)
-    #     many = base.transform_filter(alt.datum.event != "AVERAGE").mark_line(opacity=0.25).encode(
-    #         x=alt.X("t:Q", title="Forward trading days"),
-    #         y=alt.Y("ret:Q", title=("Return" if is_pct else "Δ log-spread"),
-    #                 axis=alt.Axis(format="~%" if is_pct else "")),
-    #         detail="event:N"
-    #     )
-    #     avg = base.transform_filter(alt.datum.event == "AVERAGE").mark_line(size=3).encode(
-    #         x="t:Q",
-    #         y=alt.Y("ret:Q", axis=alt.Axis(format="~%" if is_pct else "")),
-    #         color=alt.value("#000")
-    #     )
-    #     st.altair_chart((many + avg).properties(height=340, title=title), use_container_width=True)
-
-    # def terminal_hist(df, title, is_pct: bool):
-    #     if df.empty:
-    #         return
-    #     last_t = int(df["t"].max()) if not df.empty else 0
-    #     term = df[(df["t"] == last_t) & (df["event"] != "AVERAGE")]["ret"]
-    #     if term.empty:
-    #         return
-    #     hist = alt.Chart(pd.DataFrame({"x": term.values})).mark_bar().encode(
-    #         x=alt.X("x:Q", bin=alt.Bin(maxbins=30), title=("1-year return" if is_pct else "1-year Δ log-spread"),
-    #                 axis=alt.Axis(format="~%" if is_pct else "")),
-    #         y=alt.Y("count()", title="Count")
-    #     ).properties(height=200, title=f"{title} — terminal distribution")
-    #     st.altair_chart(hist, use_container_width=True)
-
-    # cols = st.columns(3)
-    # with cols[0]:
-    #     plot_paths(paths_a.assign(ret=paths_a["ret"].astype(float)), f"{a_col}: forward path after similar z", is_pct=True)
-    #     terminal_hist(paths_a, f"{a_col}", is_pct=True)
-    # with cols[1]:
-    #     plot_paths(paths_b.assign(ret=paths_b["ret"].astype(float)), f"{b_col}: forward path after similar z", is_pct=True)
-    #     terminal_hist(paths_b, f"{b_col}", is_pct=True)
-    # with cols[2]:
-    #     plot_paths(paths_s.assign(ret=paths_s["ret"].astype(float)), "log-spread(A−B): forward path after similar z", is_pct=False)
-    #     terminal_hist(paths_s, "log-spread(A−B)", is_pct=False)
-
-    # st.caption(f"Events matched: {len([e for e in events])}. ‘AVERAGE’ = mean of matched paths.")
 
 # Router for Market Analytics
 # Replace the whole function
