@@ -1680,6 +1680,7 @@ def show_fund_monitor() -> None:
 
     fund_df = df[df.get("fund_id", pd.Series(dtype=str)).astype(str) == str(selected_canonical_id)].copy()
 
+    st.info(fund_df.shape)
     # ========= Tabs =========
     tabs = st.tabs(["Overview", "Portfolio Exposures", "Manager Updates", "Quant", "Newsflow"])
 
