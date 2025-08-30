@@ -2095,8 +2095,6 @@ def show_fund_monitor() -> None:
                     )
 
         st.markdown("---")
-        st.markdown("### Historical Net/Gross")
-
         # side-by-side: left = chart, right = Market Cap exposures
         ng1, ng2 = st.columns(2)
 
@@ -2123,6 +2121,7 @@ def show_fund_monitor() -> None:
 
         # RIGHT: Market Cap exposure table (mcap_long/short/gross/net)
         with ng2:
+            st.markdown("**Historical Net/Gross**")
             if {"date", "net", "gross"} <= set(fund_df.columns):
                 hist_df = fund_df[["date", "net", "gross"]].copy()
                 hist_df["date"] = pd.to_datetime(hist_df["date"], errors="coerce")
@@ -2150,12 +2149,13 @@ def show_fund_monitor() -> None:
         # Top 10 positions moved BELOW the Historical Net/Gross block
         # ---- replace from: st.markdown("---")  (Top 10 Positions header)  ----
         st.markdown("---")
-        st.markdown("### Top 10 Positions")
+        st.markdown("### Portfolio Snapshot")
 
         # two-column layout: left = table, right = scoreboxes
         tp_left, tp_right = st.columns([3, 1])
 
         with tp_left:
+            st.markdown("**Top 10 Positions**")
             try:
                 letters = _load_letters()
             except Exception:
@@ -2196,7 +2196,6 @@ def show_fund_monitor() -> None:
                     st.dataframe(_fm_arrow_safe(view), use_container_width=True, height=350)
 
         with tp_right:
-            st.markdown("**Portfolio Snapshot**")
 
             def _fmt(x):
                 if x is None or (isinstance(x, float) and pd.isna(x)):
