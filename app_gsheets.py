@@ -2449,14 +2449,6 @@ def show_fund_monitor() -> None:
             st.caption("Check st.secrets['drive']['parent_folder_id'] and that the folder name matches canonical_id exactly.")
             st.stop()
 
-        left, right = st.columns([3,2])
-        with left:
-            st.markdown(f"**Folder:** {folder.get('name')}  |  **Owner:** { (folder.get('owners') or [{}])[0].get('displayName','') }")
-            st.markdown(f"[Open in Drive]({folder.get('webViewLink')})")
-        with right:
-            st.markdown(f"**Last modified:** {pd.to_datetime(folder.get('modifiedTime'), errors='coerce')}")
-
-        st.markdown("---")
         df_files = _drive_list_children(folder["id"])
 
         # Quick filters
@@ -2472,7 +2464,7 @@ def show_fund_monitor() -> None:
             view = view[view["Type"] == show]
 
         st.dataframe(
-            view,
+            view.drop(columns=["Owner"]),
             use_container_width=True,
             hide_index=True,
             column_config={
