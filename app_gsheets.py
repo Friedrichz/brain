@@ -1633,7 +1633,6 @@ def _load_fund_news() -> pd.DataFrame:
         df = df[expected]
     return df
 
-
 # ADD near other helpers (below _format_exposure_table)
 def _full_table_height(df: pd.DataFrame, *, row_px: int = 34, header_px: int = 40, pad_px: int = 24) -> int:
     """
@@ -1643,6 +1642,64 @@ def _full_table_height(df: pd.DataFrame, *, row_px: int = 34, header_px: int = 4
     base = getattr(df, "data", df)  # Styler -> underlying DataFrame
     nrows = int(getattr(base, "shape", (0, 0))[0])
     return int(header_px + nrows * row_px + pad_px)
+
+# ---------- ADD: Drive folder + listing helpers (near other Drive helpers) ----------
+@st.cache_data(show_spinner=False, ttl=600)
+def _drive_find_folder_by_name(parent_folder_id: str, name: str) -> dict | None:
+    svc = _drive_client()
+    q = (
+        f"'{parent_folder_id}' in parents and "
+        f"name = '{name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    )
+    resp = svc.files().list(
+        q=q,
+        fields="files(id,name,webViewLink,modifiedTime,owners(displayName))",
+        includeItemsFromAllDrives=True,
+        supportsAllDrives=True,
+        corpora="allDrives",
+        pageSize=10,
+    ).execute()
+    files = resp.get("files", [])
+    return files[0] if files else None
+
+@st.cache_data(show_spinner=False, ttl=600)
+def _drive_list_children(folder_id: str) -> pd.DataFrame:
+    svc = _drive_client()
+    fields = "nextPageToken, files(id,name,mimeType,modifiedTime,owners(displayName),size,webViewLink,webContentLink)"
+    page_token = None
+    rows: list[dict] = []
+    while True:
+        resp = svc.files().list(
+            q=f"'{folder_id}' in parents and trashed = false",
+            fields=fields,
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True,
+            corpora="allDrives",
+            orderBy="folder,name_natural",
+            pageToken=page_token,
+            pageSize=100,
+        ).execute()
+        rows.extend(resp.get("files", []))
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    if not rows:
+        return pd.DataFrame(columns=["Type","Name","Last modified","Owner","Size (bytes)","Open","Download"])
+    def _kind(mt: str) -> str:
+        return "Folder" if mt == "application/vnd.google-apps.folder" else "File"
+    df = pd.DataFrame([{
+        "Type": _kind(r.get("mimeType","")),
+        "Name": r.get("name",""),
+        "Last modified": pd.to_datetime(r.get("modifiedTime"), errors="coerce"),
+        "Owner": (r.get("owners") or [{}])[0].get("displayName"),
+        "Size (bytes)": pd.to_numeric(r.get("size", None), errors="coerce"),
+        "Open": r.get("webViewLink"),
+        "Download": r.get("webContentLink"),
+    } for r in rows])
+    # Folders don’t expose webContentLink; keep NaN for those.
+    return df.sort_values(["Type","Name"]).reset_index(drop=True)
+
+
 
 # ---------- public entry: call this from main router ----------
 def show_fund_monitor() -> None:
@@ -1710,7 +1767,7 @@ def show_fund_monitor() -> None:
 
     fund_df = df[df.get("fund_id", pd.Series(dtype=str)).astype(str) == str(selected_canonical_id)].copy()
     # ========= Tabs =========
-    tabs = st.tabs(["Overview", "Portfolio Exposures", "Manager Updates", "Quant", "Newsflow"])
+    tabs = st.tabs(["Overview", "Portfolio Exposures", "Manager Updates", "Quant", "Newsflow", "Files"])
 
     # --------------------------------
     # Tab 1: Overview
@@ -2376,6 +2433,58 @@ def show_fund_monitor() -> None:
                     "Link": st.column_config.LinkColumn(display_text="open"),
                 },
             )
+
+
+    # --------------------------------
+    # Tab 6: Files
+    # --------------------------------
+    with tabs[5]:
+        st.subheader("Fund Data")
+        parent_id = st.secrets["drive"]["parent_folder_id"]
+        canon = str(selected_canonical_id).strip()
+        folder = _drive_find_folder_by_name(parent_id, canon)
+
+        if not folder:
+            st.info(f"No folder named '{canon}' found under the configured parent.")
+            st.caption("Check st.secrets['drive']['parent_folder_id'] and that the folder name matches canonical_id exactly.")
+            st.stop()
+
+        left, right = st.columns([3,2])
+        with left:
+            st.markdown(f"**Folder:** {folder.get('name')}  |  **Owner:** { (folder.get('owners') or [{}])[0].get('displayName','') }")
+            st.markdown(f"[Open in Drive]({folder.get('webViewLink')})")
+        with right:
+            st.markdown(f"**Last modified:** {pd.to_datetime(folder.get('modifiedTime'), errors='coerce')}")
+
+        st.markdown("---")
+        df_files = _drive_list_children(folder["id"])
+
+        # Quick filters
+        c1, c2 = st.columns([2,1])
+        with c1:
+            q = st.text_input("Filter by name contains", "")
+        with c2:
+            show = st.selectbox("Type", ["All","Folder","File"], index=0)
+        view = df_files.copy()
+        if q:
+            view = view[view["Name"].astype(str).str.contains(q, case=False, na=False)]
+        if show != "All":
+            view = view[view["Type"] == show]
+
+        st.dataframe(
+            view,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Last modified": st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm", step="second"),
+                "Size (bytes)": st.column_config.NumberColumn(format="%,.0f"),
+                "Open": st.column_config.LinkColumn(display_text="open"),
+                "Download": st.column_config.LinkColumn(display_text="download"),
+            },
+        )
+
+        st.caption("Folders list first. Download is available for binary files.")
+
 
 # ======================= END DROP-IN: Fund Monitor =======================
 
