@@ -2097,7 +2097,7 @@ def show_fund_monitor() -> None:
         st.markdown("---")
         st.markdown("### Historical Net/Gross")
 
-        # side-by-side: left = chart, right = Top 10 positions
+        # side-by-side: left = chart, right = Market Cap exposures
         ng1, ng2 = st.columns(2)
 
         with ng1:
@@ -2117,53 +2117,75 @@ def show_fund_monitor() -> None:
                             y=alt.Y("Value:Q", title="Exposure"),
                             color=alt.Color("Exposure:N", title="Type"),
                             tooltip=[alt.Tooltip("date:T"),
-                                    alt.Tooltip("Exposure:N"),
-                                    alt.Tooltip("Value:Q")]
+                                     alt.Tooltip("Exposure:N"),
+                                     alt.Tooltip("Value:Q")]
                         )
                         .properties(height=350)
                     )
                     st.altair_chart(ch, use_container_width=True)
 
+        # RIGHT: Market Cap exposure table (mcap_long/short/gross/net)
         with ng2:
-            st.markdown("**Top 10 Positions**")
-            try:
-                letters = _load_letters()
-            except Exception:
-                letters = pd.DataFrame()
-            if (
-                letters.empty
-                or not {"fund_id", "report_date", "position_ticker", "position_weight_percent"} <= set(letters.columns)
-            ):
+            st.markdown("**Market Cap Exposures**")
+            mcap_keys = ["mcap_long", "mcap_short", "mcap_gross", "mcap_net"]
+            if all(k in row.index for k in mcap_keys):
+                mcap_df = build_exposure_df(row, mcap_keys)
+                try:
+                    tbl = _format_exposure_table(mcap_df)
+                    st.dataframe(
+                        tbl,
+                        use_container_width=True,
+                        height=_full_table_height(tbl)
+                    )
+                except Exception:
+                    st.dataframe(
+                        mcap_df,
+                        use_container_width=True,
+                        height=_full_table_height(mcap_df)
+                    )
+            else:
+                st.info("No market cap exposures available.")
+
+        # Top 10 positions moved BELOW the Historical Net/Gross block
+        st.markdown("---")
+        st.markdown("### Top 10 Positions")
+        try:
+            letters = _load_letters()
+        except Exception:
+            letters = pd.DataFrame()
+        if (
+            letters.empty
+            or not {"fund_id", "report_date", "position_ticker", "position_weight_percent"} <= set(letters.columns)
+        ):
+            st.info("No positions available.")
+        else:
+            dfp = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
+            dfp["report_date"] = pd.to_datetime(dfp["report_date"], errors="coerce")
+            if dfp.empty or dfp["report_date"].dropna().empty:
                 st.info("No positions available.")
             else:
-                dfp = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
-                dfp["report_date"] = pd.to_datetime(dfp["report_date"], errors="coerce")
-                if dfp.empty or dfp["report_date"].dropna().empty:
-                    st.info("No positions available.")
-                else:
-                    latest_rd = dfp["report_date"].max()
-                    dfp = dfp[dfp["report_date"] == latest_rd].copy()
-                    for c in ["position_name", "position_sector"]:
-                        if c not in dfp.columns:
-                            dfp[c] = None
-                    view = dfp[
-                        ["position_name", "position_ticker", "position_sector", "position_weight_percent"]
-                    ].rename(
-                        columns={
-                            "position_name": "Position Name",
-                            "position_ticker": "Position Ticker",
-                            "position_sector": "Position Sector",
-                            "position_weight_percent": "Position Weight (%)",
-                        }
-                    ).copy()
-                    view["Position Weight (%)"] = pd.to_numeric(view["Position Weight (%)"], errors="coerce")
-                    view = (
-                        view.dropna(subset=["Position Ticker"])
+                latest_rd = dfp["report_date"].max()
+                dfp = dfp[dfp["report_date"] == latest_rd].copy()
+                for c in ["position_name", "position_sector"]:
+                    if c not in dfp.columns:
+                        dfp[c] = None
+                view = dfp[
+                    ["position_name", "position_ticker", "position_sector", "position_weight_percent"]
+                ].rename(
+                    columns={
+                        "position_name": "Position Name",
+                        "position_ticker": "Position Ticker",
+                        "position_sector": "Position Sector",
+                        "position_weight_percent": "Position Weight (%)",
+                    }
+                ).copy()
+                view["Position Weight (%)"] = pd.to_numeric(view["Position Weight (%)"], errors="coerce")
+                view = (
+                    view.dropna(subset=["Position Ticker"])
                         .sort_values("Position Weight (%)", ascending=False)
                         .head(10)
-                    )
-                    st.dataframe(_fm_arrow_safe(view), use_container_width=True, height=350)
-
+                )
+                st.dataframe(_fm_arrow_safe(view), use_container_width=True, height=350)
 
     # --------------------------------
     # Tab 3: Manager Updates
