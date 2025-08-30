@@ -1382,7 +1382,7 @@ def _format_exposure_table(df: pd.DataFrame) -> Styler:
     out = df.copy()
     out.index = out.index.astype(str).str.strip().str.strip('"').str.strip("'")
     # remove "sector_" / "geo_" prefixes
-    out.columns = [c.replace("sector_", "").replace("geo_", "") for c in out.columns]
+    out.columns = [c.replace("sector_", "").replace("geo_", "").replace("mcap_", "") for c in out.columns]
 
     for c in out.columns:
         out[c] = pd.to_numeric(out[c], errors="coerce")
@@ -2101,6 +2101,28 @@ def show_fund_monitor() -> None:
         ng1, ng2 = st.columns(2)
 
         with ng1:
+            st.markdown("**Market Cap Exposures**")
+            mcap_keys = ["mcap_long", "mcap_short", "mcap_gross", "mcap_net"]
+            if all(k in row.index for k in mcap_keys):
+                mcap_df = build_exposure_df(row, mcap_keys)
+                try:
+                    tbl = _format_exposure_table(mcap_df)
+                    st.dataframe(
+                        tbl,
+                        use_container_width=True,
+                        height=_full_table_height(tbl)
+                    )
+                except Exception:
+                    st.dataframe(
+                        mcap_df,
+                        use_container_width=True,
+                        height=_full_table_height(mcap_df)
+                    )
+            else:
+                st.info("No market cap exposures available.")
+
+        # RIGHT: Market Cap exposure table (mcap_long/short/gross/net)
+        with ng2:
             if {"date", "net", "gross"} <= set(fund_df.columns):
                 hist_df = fund_df[["date", "net", "gross"]].copy()
                 hist_df["date"] = pd.to_datetime(hist_df["date"], errors="coerce")
@@ -2123,28 +2145,7 @@ def show_fund_monitor() -> None:
                         .properties(height=350)
                     )
                     st.altair_chart(ch, use_container_width=True)
-
-        # RIGHT: Market Cap exposure table (mcap_long/short/gross/net)
-        with ng2:
-            st.markdown("**Market Cap Exposures**")
-            mcap_keys = ["mcap_long", "mcap_short", "mcap_gross", "mcap_net"]
-            if all(k in row.index for k in mcap_keys):
-                mcap_df = build_exposure_df(row, mcap_keys)
-                try:
-                    tbl = _format_exposure_table(mcap_df)
-                    st.dataframe(
-                        tbl,
-                        use_container_width=True,
-                        height=_full_table_height(tbl)
-                    )
-                except Exception:
-                    st.dataframe(
-                        mcap_df,
-                        use_container_width=True,
-                        height=_full_table_height(mcap_df)
-                    )
-            else:
-                st.info("No market cap exposures available.")
+            
 
         # Top 10 positions moved BELOW the Historical Net/Gross block
         st.markdown("---")
