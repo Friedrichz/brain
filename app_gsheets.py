@@ -2148,45 +2148,74 @@ def show_fund_monitor() -> None:
             
 
         # Top 10 positions moved BELOW the Historical Net/Gross block
+        # ---- replace from: st.markdown("---")  (Top 10 Positions header)  ----
         st.markdown("---")
         st.markdown("### Top 10 Positions")
-        try:
-            letters = _load_letters()
-        except Exception:
-            letters = pd.DataFrame()
-        if (
-            letters.empty
-            or not {"fund_id", "report_date", "position_ticker", "position_weight_percent"} <= set(letters.columns)
-        ):
-            st.info("No positions available.")
-        else:
-            dfp = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
-            dfp["report_date"] = pd.to_datetime(dfp["report_date"], errors="coerce")
-            if dfp.empty or dfp["report_date"].dropna().empty:
+
+        # two-column layout: left = table, right = scoreboxes
+        tp_left, tp_right = st.columns([3, 1])
+
+        with tp_left:
+            try:
+                letters = _load_letters()
+            except Exception:
+                letters = pd.DataFrame()
+
+            if (
+                letters.empty
+                or not {"fund_id", "report_date", "position_ticker", "position_weight_percent"} <= set(letters.columns)
+            ):
                 st.info("No positions available.")
             else:
-                latest_rd = dfp["report_date"].max()
-                dfp = dfp[dfp["report_date"] == latest_rd].copy()
-                for c in ["position_name", "position_sector"]:
-                    if c not in dfp.columns:
-                        dfp[c] = None
-                view = dfp[
-                    ["position_name", "position_ticker", "position_sector", "position_weight_percent"]
-                ].rename(
-                    columns={
-                        "position_name": "Position Name",
-                        "position_ticker": "Position Ticker",
-                        "position_sector": "Position Sector",
-                        "position_weight_percent": "Position Weight (%)",
-                    }
-                ).copy()
-                view["Position Weight (%)"] = pd.to_numeric(view["Position Weight (%)"], errors="coerce")
-                view = (
-                    view.dropna(subset=["Position Ticker"])
-                        .sort_values("Position Weight (%)", ascending=False)
-                        .head(10)
-                )
-                st.dataframe(_fm_arrow_safe(view), use_container_width=True, height=350)
+                dfp = letters[letters["fund_id"].astype(str) == str(selected_canonical_id)].copy()
+                dfp["report_date"] = pd.to_datetime(dfp["report_date"], errors="coerce")
+                if dfp.empty or dfp["report_date"].dropna().empty:
+                    st.info("No positions available.")
+                else:
+                    latest_rd = dfp["report_date"].max()
+                    dfp = dfp[dfp["report_date"] == latest_rd].copy()
+                    for c in ["position_name", "position_sector"]:
+                        if c not in dfp.columns:
+                            dfp[c] = None
+                    view = dfp[
+                        ["position_name", "position_ticker", "position_sector", "position_weight_percent"]
+                    ].rename(
+                        columns={
+                            "position_name": "Position Name",
+                            "position_ticker": "Position Ticker",
+                            "position_sector": "Position Sector",
+                            "position_weight_percent": "Position Weight (%)",
+                        }
+                    ).copy()
+                    view["Position Weight (%)"] = pd.to_numeric(view["Position Weight (%)"], errors="coerce")
+                    view = (
+                        view.dropna(subset=["Position Ticker"])
+                            .sort_values("Position Weight (%)", ascending=False)
+                            .head(10)
+                    )
+                    st.dataframe(_fm_arrow_safe(view), use_container_width=True, height=350)
+
+        with tp_right:
+            st.markdown("**Portfolio Snapshot**")
+
+            def _fmt(x):
+                if x is None or (isinstance(x, float) and pd.isna(x)):
+                    return "-"
+                s = str(x).strip()
+                return s if s else "-"
+
+            # pull directly from the exposure source row for the selected date/file_type
+            metrics = [
+                ("Long positions", _fmt(row.get("num_pos_long"))),
+                ("Short positions", _fmt(row.get("num_pos_short"))),
+                ("Total positions", _fmt(row.get("num_pos_tot"))),
+                ("Top 5 longs",    _fmt(row.get("port_top5_longs"))),
+                ("Top 10 longs",   _fmt(row.get("port_top10_longs"))),
+            ]
+
+            # stacked scoreboxes
+            for label, val in metrics:
+                _fm_scorecard(label, val)
 
     # --------------------------------
     # Tab 3: Manager Updates
