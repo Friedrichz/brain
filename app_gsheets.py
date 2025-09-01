@@ -2967,17 +2967,20 @@ def _rel_return_window(pair: pd.DataFrame, a_col: str, b_col: str, start_ts: pd.
 def _plot_dual_axis_price(pair: pd.DataFrame, a_col: str, b_col: str):
     fig, ax1 = plt.subplots(figsize=(10, 5), dpi=120)
     ax2 = ax1.twinx()
-    ax1.plot(pair["date"], pair[a_col], label=a_col, color="tab:blue")
-    ax2.plot(pair["date"], pair[b_col], label=b_col, color="tab:green")
-    ax1.set_ylabel(a_col)
-    ax2.set_ylabel(b_col)
+
+    l1, = ax1.plot(pair["date"], pair[a_col], label=a_col, color="tab:blue")
+    l2, = ax2.plot(pair["date"], pair[b_col], label=b_col, color="tab:orange")
+
+    ax1.set_ylabel(a_col, color="tab:blue")
+    ax2.set_ylabel(b_col, color="tab:orange")
+
     ax1.set_title(f"{a_col} vs {b_col} — prices")
     ax1.grid(True, alpha=0.2)
 
     lines = [l1, l2]
     labels = [l.get_label() for l in lines]
     ax1.legend(lines, labels, loc="upper left")
-    
+
     return fig
 
 def _plot_rolling_rel_perf(pair: pd.DataFrame, a_col: str, b_col: str, window: int = 90):
