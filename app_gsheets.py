@@ -2973,6 +2973,11 @@ def _plot_dual_axis_price(pair: pd.DataFrame, a_col: str, b_col: str):
     ax2.set_ylabel(b_col)
     ax1.set_title(f"{a_col} vs {b_col} — prices")
     ax1.grid(True, alpha=0.2)
+
+    lines = [l1, l2]
+    labels = [l.get_label() for l in lines]
+    ax1.legend(lines, labels, loc="upper left")
+    
     return fig
 
 def _plot_rolling_rel_perf(pair: pd.DataFrame, a_col: str, b_col: str, window: int = 90):
