@@ -2972,7 +2972,7 @@ def _plot_dual_axis_price(pair: pd.DataFrame, a_col: str, b_col: str):
     l2, = ax2.plot(pair["date"], pair[b_col], label=b_col, color="tab:green")
 
     ax1.set_ylabel(a_col, color="tab:blue")
-    ax2.set_ylabel(b_col, color="tab:orange")
+    ax2.set_ylabel(b_col, color="tab:green")
 
     ax1.set_title(f"{a_col} vs {b_col} — prices")
     ax1.grid(True, alpha=0.2)
