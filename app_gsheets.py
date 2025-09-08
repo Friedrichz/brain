@@ -3120,6 +3120,136 @@ def show_market_analytics():
         view_relative_zscore()
 
 
+def show_llamaindex_chat() -> None:
+    import streamlit as st
+    import requests
+    import time
+
+    st.header("LLM Chat (LlamaIndex Cloud)")
+    st.caption("Chat against a specific LlamaIndex Hosted Index using your API key and endpoint.")
+
+    # Config from secrets with UI overrides
+    cfg = st.secrets.get("llamaindex", {})
+    default_endpoint = str(cfg.get("endpoint", "")).strip()
+    default_index_id = str(cfg.get("index_id", "")).strip()
+    default_system   = str(cfg.get("system", "")).strip()
+
+    with st.expander("Connection", expanded=not (default_endpoint and default_index_id)):
+        endpoint = st.text_input("Base Endpoint URL", value=default_endpoint, placeholder="https://api.llamaindex.ai")
+        index_id = st.text_input("Index ID", value=default_index_id, placeholder="idx_XXXXXXXXXXXX")
+        api_key  = st.text_input("API Key", value=cfg.get("api_key", ""), type="password")
+        system   = st.text_area("System Prompt (optional)", value=default_system, height=80)
+
+    if "llama_chat" not in st.session_state:
+        st.session_state.llama_chat = []  # [{"role":"user"/"assistant", "content":"..."}]
+
+    # Render history
+    for msg in st.session_state.llama_chat:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    prompt = st.chat_input("Type your question…")
+    if not prompt:
+        return
+
+    # Append user message
+    st.session_state.llama_chat.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Guardrails
+    if not endpoint or not index_id or not api_key:
+        with st.chat_message("assistant"):
+            st.error("Missing endpoint, index_id, or api_key.")
+        return
+
+    # Compose request
+    base = endpoint.rstrip("/")
+    url  = f"{base}/api/v1/indexes/{index_id}/query"  # LlamaIndex Cloud Hosted Index query route
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    # Convert history into a minimal chat format the endpoint can accept.
+    # Many LlamaIndex deployments accept {query, chat_history, system_prompt, stream}.
+    # History is reduced to pairs of user/assistant strings.
+    history_pairs = []
+    h = st.session_state.llama_chat[:-1]  # exclude current user we already added
+    for i in range(0, len(h), 2):
+        u = h[i]["content"] if i < len(h) and h[i]["role"] == "user" else ""
+        a = h[i+1]["content"] if i+1 < len(h) and h[i+1]["role"] == "assistant" else ""
+        history_pairs.append({"user": u, "assistant": a})
+
+    payload = {
+        "query": prompt,
+        "chat_history": history_pairs,
+        "system_prompt": system or None,
+        "stream": False
+    }
+
+    # Call endpoint
+    t0 = time.time()
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+    except requests.RequestException as e:
+        with st.chat_message("assistant"):
+            st.error(f"Request failed: {e}")
+        return
+
+    # Handle response
+    latency = (time.time() - t0) * 1000
+    if resp.status_code != 200:
+        with st.chat_message("assistant"):
+            st.error(f"HTTP {resp.status_code}: {resp.text[:500]}")
+        return
+
+    try:
+        data = resp.json()
+    except Exception:
+        with st.chat_message("assistant"):
+            st.error("Non-JSON response.")
+        return
+
+    # Expected shapes commonly returned by LlamaIndex Cloud:
+    # - {"response": "<text>", "source_nodes": [{"text": "...", "score": 0.7, "metadata": {...}}], ...}
+    # - or {"answer": "<text>", "sources": [...]}
+    answer = (
+        data.get("response")
+        or data.get("answer")
+        or data.get("message")
+        or ""
+    ).strip()
+
+    # Build citation block if provided
+    sources = data.get("source_nodes") or data.get("sources") or []
+    src_md = ""
+    if isinstance(sources, list) and sources:
+        rows = []
+        for i, s in enumerate(sources, 1):
+            # Try to pull URL/title/snippet robustly
+            meta = s.get("metadata", {}) if isinstance(s, dict) else {}
+            title = meta.get("title") or meta.get("file_name") or meta.get("source") or f"Source {i}"
+            url   = meta.get("url") or meta.get("link") or meta.get("source_url") or ""
+            score = s.get("score") if isinstance(s, dict) else None
+            snippet = (s.get("text") or meta.get("text") or "")[:280].strip()
+            score_str = f" — score {score:.2f}" if isinstance(score, (int, float)) else ""
+            if url:
+                rows.append(f"- [{title}]({url}){score_str}\n  \n  {snippet}")
+            else:
+                rows.append(f"- {title}{score_str}\n  \n  {snippet}")
+        if rows:
+            src_md = "\n\n**Sources**\n" + "\n".join(rows)
+
+    final = answer + (src_md if src_md else "")
+    with st.chat_message("assistant"):
+        st.markdown(final)
+
+    st.session_state.llama_chat.append({"role": "assistant", "content": final})
+    st.caption(f"Latency: {latency:.0f} ms")
+
+
 # ---- Main ----
 def main() -> None:
     st.set_page_config(page_title="Investment Brain", layout="wide")
@@ -3204,6 +3334,7 @@ def main() -> None:
             st.Page(show_performance_view, title="Performance Estimates"),
             st.Page(show_market_view, title="Market Views"),
             st.Page(show_market_analytics, title="Market Analytics"),
+            st.Page(show_llamaindex_chat, title="LLM Chat"),
         ]
     )
     nav.run()
