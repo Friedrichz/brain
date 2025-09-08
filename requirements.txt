@@ -13,3 +13,4 @@ pandas_datareader
 setuptools
 matplotlib
 llama_cloud_services
+llama-index-llms-openai
