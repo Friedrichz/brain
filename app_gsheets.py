@@ -3220,6 +3220,10 @@ def show_llamaindex_chat() -> None:
             sources = nodes
 
         else:
+            import openai, streamlit as st
+            if "openai" in st.secrets and "api_key" in st.secrets["openai"]:
+                openai.api_key = st.secrets["openai"]["api_key"]
+
             qe = idx.as_query_engine()
             # Some backends accept system prompt or chat history; pass via kwargs if supported.
             # Fallback to plain .query(prompt) if extras are not supported by the SDK version.
