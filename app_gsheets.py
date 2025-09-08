@@ -3122,132 +3122,195 @@ def show_market_analytics():
 
 def show_llamaindex_chat() -> None:
     import streamlit as st
-    import requests
     import time
+    from typing import Any, Dict, List, Optional
+    from llama_cloud_services import LlamaCloudIndex
 
-    st.header("LLM Chat (LlamaIndex Cloud)")
-    st.caption("Chat against a specific LlamaIndex Hosted Index using your API key and endpoint.")
 
-    # Config from secrets with UI overrides
+    # pip install llama-cloud-services
+    try:
+        from llama_cloud_services import LlamaCloudIndex
+    except Exception as e:
+        st.error("Missing dependency: pip install llama-cloud-services")
+        return
+
+    st.header("LLM Chat (LlamaIndex Cloud • SDK)")
+
+    # ---- Config from secrets with UI overrides ----
     cfg = st.secrets.get("llamaindex", {})
-    default_endpoint = str(cfg.get("endpoint", "")).strip()
-    default_index_id = str(cfg.get("index_id", "")).strip()
-    default_system   = str(cfg.get("system", "")).strip()
+    default_api_key        = str(cfg.get("api_key", "")).strip()
+    default_base_url       = str(cfg.get("base_url", "")).strip()  # e.g. https://api.cloud.eu.llamaindex.ai
+    default_org_id         = str(cfg.get("organization_id", "")).strip()
+    default_project        = str(cfg.get("project_name", "Default")).strip()
+    default_index_name     = str(cfg.get("index_name", "research")).strip()
+    default_system         = str(cfg.get("system", "")).strip()
+    default_top_k          = int(cfg.get("top_k", 5))
 
-    with st.expander("Connection", expanded=not (default_endpoint and default_index_id)):
-        endpoint = st.text_input("Base Endpoint URL", value=default_endpoint, placeholder="https://api.llamaindex.ai")
-        index_id = st.text_input("Index ID", value=default_index_id, placeholder="idx_XXXXXXXXXXXX")
-        api_key  = st.text_input("API Key", value=cfg.get("api_key", ""), type="password")
-        system   = st.text_area("System Prompt (optional)", value=default_system, height=80)
+    with st.expander("Connection", expanded=not (default_api_key and default_base_url and default_org_id)):
+        base_url   = st.text_input("API Base URL", value=default_base_url, placeholder="https://api.cloud.eu.llamaindex.ai")
+        api_key    = st.text_input("API Key", value=default_api_key, type="password")
+        organization_id = st.text_input("Organization ID", value=default_org_id)
+        project_name    = st.text_input("Project", value=default_project)
+        index_name      = st.text_input("Index Name", value=default_index_name)
+        system_prompt   = st.text_area("System Prompt (optional)", value=default_system, height=80)
+        top_k           = st.number_input("Retriever top_k", min_value=1, max_value=50, value=default_top_k, step=1)
+        mode            = st.radio("Mode", ["Query Engine", "Retriever only"], index=0, horizontal=True)
 
+    # ---- Session state ----
     if "llama_chat" not in st.session_state:
-        st.session_state.llama_chat = []  # [{"role":"user"/"assistant", "content":"..."}]
+        st.session_state.llama_chat: List[Dict[str, str]] = []
 
-    # Render history
+    # render history
     for msg in st.session_state.llama_chat:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
+    # ---- Chat input ----
     prompt = st.chat_input("Type your question…")
     if not prompt:
         return
 
-    # Append user message
     st.session_state.llama_chat.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Guardrails
-    if not endpoint or not index_id or not api_key:
+    # ---- Validation ----
+    missing = []
+    if not api_key: missing.append("api_key")
+    if not base_url: missing.append("base_url")
+    if not organization_id: missing.append("organization_id")
+    if not index_name: missing.append("index_name")
+    if missing:
         with st.chat_message("assistant"):
-            st.error("Missing endpoint, index_id, or api_key.")
+            st.error("Missing: " + ", ".join(missing))
         return
 
-    # Compose request
-    base = endpoint.rstrip("/")
-    url  = f"{base}/api/v1/indexes/{index_id}/query"  # LlamaIndex Cloud Hosted Index query route
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
+    # ---- Build SDK index instance (point to API host, not UI host) ----
+    try:
+        idx = LlamaCloudIndex(
+            name=index_name,
+            project_name=project_name or "Default",
+            organization_id=organization_id,
+            api_key=api_key,
+            base_url=base_url,  # e.g. https://api.cloud.eu.llamaindex.ai
+        )
+    except Exception as e:
+        with st.chat_message("assistant"):
+            st.error(f"Failed to initialize LlamaCloudIndex: {e}")
+        return
 
-    # Convert history into a minimal chat format the endpoint can accept.
-    # Many LlamaIndex deployments accept {query, chat_history, system_prompt, stream}.
-    # History is reduced to pairs of user/assistant strings.
-    history_pairs = []
-    h = st.session_state.llama_chat[:-1]  # exclude current user we already added
-    for i in range(0, len(h), 2):
-        u = h[i]["content"] if i < len(h) and h[i]["role"] == "user" else ""
-        a = h[i+1]["content"] if i+1 < len(h) and h[i+1]["role"] == "assistant" else ""
-        history_pairs.append({"user": u, "assistant": a})
-
-    payload = {
-        "query": prompt,
-        "chat_history": history_pairs,
-        "system_prompt": system or None,
-        "stream": False
-    }
-
-    # Call endpoint
+    # ---- Execute ----
     t0 = time.time()
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
-    except requests.RequestException as e:
+        if mode == "Retriever only":
+            retriever = idx.as_retriever()
+            # Many deployments accept kwargs such as similarity_top_k; keep generic top_k
+            result = retriever.retrieve(prompt, top_k=top_k)
+            nodes = result or []
+            # Compose a minimal answer from retrieved contexts; you can swap in your own LLM later.
+            parts = []
+            for i, n in enumerate(nodes[:5], 1):
+                try:
+                    txt = (getattr(n, "text", None) or n.get("text") or "").strip()
+                except Exception:
+                    txt = ""
+                if txt:
+                    parts.append(f"{i}. {txt[:700]}")
+            answer = "Top retrieved context:\n\n" + ("\n\n".join(parts) if parts else "(no text returned)")
+            sources = nodes
+
+        else:
+            qe = idx.as_query_engine()
+            # Some backends accept system prompt or chat history; pass via kwargs if supported.
+            # Fallback to plain .query(prompt) if extras are not supported by the SDK version.
+            answer_text = None
+            resp_obj: Optional[Any] = None
+            try:
+                # Attempt richer signature first
+                history_pairs = []
+                h = st.session_state.llama_chat[:-1]
+                for i in range(0, len(h), 2):
+                    u = h[i]["content"] if i < len(h) and h[i]["role"] == "user" else ""
+                    a = h[i+1]["content"] if i+1 < len(h) and h[i+1]["role"] == "assistant" else ""
+                    history_pairs.append({"user": u, "assistant": a})
+                resp_obj = qe.query(
+                    prompt,
+                    system_prompt=(system_prompt or None),
+                    chat_history=history_pairs or None,
+                )
+            except TypeError:
+                # SDK without extra parameters
+                resp_obj = qe.query(prompt)
+
+            # Normalize response object
+            answer_text = (
+                getattr(resp_obj, "response", None)
+                or getattr(resp_obj, "answer", None)
+                or str(resp_obj)
+            )
+            answer = (answer_text or "").strip()
+
+            # Pull sources if exposed
+            sources = (
+                getattr(resp_obj, "source_nodes", None)
+                or getattr(resp_obj, "sources", None)
+                or []
+            )
+
+    except Exception as e:
         with st.chat_message("assistant"):
-            st.error(f"Request failed: {e}")
+            st.error(f"Query failed: {e}")
         return
 
-    # Handle response
-    latency = (time.time() - t0) * 1000
-    if resp.status_code != 200:
-        with st.chat_message("assistant"):
-            st.error(f"HTTP {resp.status_code}: {resp.text[:500]}")
-        return
+    # ---- Render answer + sources ----
+    def _meta_of(node: Any) -> Dict[str, Any]:
+        try:
+            # Node-like object (SDK)
+            meta = {}
+            if hasattr(node, "metadata") and isinstance(node.metadata, dict):
+                meta = dict(node.metadata)
+            elif isinstance(node, dict):
+                meta = dict(node.get("metadata", {}) or {})
+            return meta
+        except Exception:
+            return {}
 
-    try:
-        data = resp.json()
-    except Exception:
-        with st.chat_message("assistant"):
-            st.error("Non-JSON response.")
-        return
+    def _text_of(node: Any) -> str:
+        try:
+            if hasattr(node, "text"):
+                return str(node.text or "")
+            if isinstance(node, dict):
+                return str(node.get("text") or "")
+        except Exception:
+            pass
+        return ""
 
-    # Expected shapes commonly returned by LlamaIndex Cloud:
-    # - {"response": "<text>", "source_nodes": [{"text": "...", "score": 0.7, "metadata": {...}}], ...}
-    # - or {"answer": "<text>", "sources": [...]}
-    answer = (
-        data.get("response")
-        or data.get("answer")
-        or data.get("message")
-        or ""
-    ).strip()
-
-    # Build citation block if provided
-    sources = data.get("source_nodes") or data.get("sources") or []
     src_md = ""
     if isinstance(sources, list) and sources:
         rows = []
         for i, s in enumerate(sources, 1):
-            # Try to pull URL/title/snippet robustly
-            meta = s.get("metadata", {}) if isinstance(s, dict) else {}
+            meta = _meta_of(s)
             title = meta.get("title") or meta.get("file_name") or meta.get("source") or f"Source {i}"
             url   = meta.get("url") or meta.get("link") or meta.get("source_url") or ""
-            score = s.get("score") if isinstance(s, dict) else None
-            snippet = (s.get("text") or meta.get("text") or "")[:280].strip()
-            score_str = f" — score {score:.2f}" if isinstance(score, (int, float)) else ""
+            score = getattr(s, "score", None) if not isinstance(s, dict) else s.get("score")
+            snippet = _text_of(s)[:280].strip()
+            score_str = f" — score {float(score):.2f}" if isinstance(score, (int, float)) else ""
             if url:
-                rows.append(f"- [{title}]({url}){score_str}\n  \n  {snippet}")
+                rows.append(f"- [{title}]({url}){score_str}\n\n  {snippet}")
             else:
-                rows.append(f"- {title}{score_str}\n  \n  {snippet}")
+                rows.append(f"- {title}{score_str}\n\n  {snippet}")
         if rows:
             src_md = "\n\n**Sources**\n" + "\n".join(rows)
 
-    final = answer + (src_md if src_md else "")
+    final = (answer or "(empty)").strip() + (src_md if src_md else "")
+
     with st.chat_message("assistant"):
         st.markdown(final)
 
     st.session_state.llama_chat.append({"role": "assistant", "content": final})
-    st.caption(f"Latency: {latency:.0f} ms")
+
+    lat_ms = (time.time() - t0) * 1000
+    st.caption(f"Latency: {lat_ms:.0f} ms")
 
 
 # ---- Main ----
