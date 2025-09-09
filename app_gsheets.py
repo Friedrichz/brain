@@ -3120,6 +3120,105 @@ def show_market_analytics():
         view_relative_zscore()
 
 
+# ===== 2) replace your source rendering with a cleaner formatter =====
+def _node_text(n):
+    try:
+        if hasattr(n, "text") and n.text:
+            return str(n.text)
+        if isinstance(n, dict):
+            return str(n.get("text") or "")
+    except Exception:
+        pass
+    return ""
+
+def _node_score(n):
+    try:
+        if hasattr(n, "score") and isinstance(n.score, (int, float)):
+            return float(n.score)
+        if isinstance(n, dict) and isinstance(n.get("score"), (int, float)):
+            return float(n["score"])
+    except Exception:
+        pass
+    return None
+
+def _node_meta(n):
+    d = {}
+    try:
+        if hasattr(n, "metadata") and isinstance(n.metadata, dict):
+            d = dict(n.metadata)
+        elif isinstance(n, dict) and isinstance(n.get("metadata"), dict):
+            d = dict(n["metadata"])
+    except Exception:
+        pass
+    return d
+
+def _clean_snippet(s: str, *, limit: int = 220) -> str:
+    s = " ".join(s.split())  # collapse whitespace/newlines
+    s = s.replace("•", " ").strip()
+    return (s[:limit] + "…") if len(s) > limit else s
+
+def _doc_key(meta: dict) -> str:
+    # stable identity per doc when possible
+    return (
+        meta.get("document_id")
+        or meta.get("id")
+        or meta.get("file_name")
+        or meta.get("source")
+        or meta.get("url")
+        or ""
+    )
+
+def _format_sources(sources, *, min_score=0.55, max_items=4) -> str:
+    # normalize
+    items = []
+    for n in sources or []:
+        meta = _node_meta(n)
+        score = _node_score(n)
+        txt = _node_text(n)
+        items.append({
+            "score": score if score is not None else -1.0,  # unknown scores go last
+            "doc": _doc_key(meta),
+            "title": meta.get("title") or meta.get("file_name") or meta.get("source") or "Source",
+            "url": meta.get("url") or meta.get("link") or meta.get("source_url") or "",
+            "snippet": _clean_snippet(txt),
+        })
+
+    if not items:
+        return ""
+
+    # filter by score when available
+    filtered = []
+    for it in items:
+        if it["score"] < 0:  # unknown score -> keep but later de-prioritize
+            filtered.append(it)
+        elif it["score"] >= min_score:
+            filtered.append(it)
+
+    if not filtered:
+        return ""
+
+    # dedupe by document
+    seen = set()
+    deduped = []
+    for it in sorted(filtered, key=lambda x: (x["score"]), reverse=True):
+        k = it["doc"]
+        if k in seen:
+            continue
+        seen.add(k)
+        deduped.append(it)
+        if len(deduped) >= max_items:
+            break
+
+    # render
+    lines = ["**Sources**"]
+    for it in deduped:
+        sc = "" if it["score"] < 0 else f" — score {it['score']:.2f}"
+        head = f"[{it['title']}]({it['url']})" if it["url"] else it["title"]
+        lines.append(f"- {head}{sc}\n  \n  {it['snippet']}")
+    return "\n".join(lines)
+
+
+
 def show_llamaindex_chat() -> None:
     import streamlit as st
     import time
@@ -3202,64 +3301,56 @@ def show_llamaindex_chat() -> None:
     # ---- Execute ----
     t0 = time.time()
     try:
+        # ===== 1) strengthen retrieval on both paths =====
+        RETRIEVER_TOP_K = int(top_k or 5)
+        SIMILARITY_CUTOFF = 0.62  # tune 0.55–0.75
+
         if mode == "Retriever only":
             retriever = idx.as_retriever()
-            # Many deployments accept kwargs such as similarity_top_k; keep generic top_k
-            result = retriever.retrieve(prompt, top_k=top_k)
+            # prefer kwargs if the SDK supports them (older versions ignore extras)
+            try:
+                result = retriever.retrieve(
+                    prompt,
+                    similarity_top_k=RETRIEVER_TOP_K,
+                    similarity_cutoff=SIMILARITY_CUTOFF,
+                )
+            except TypeError:
+                result = retriever.retrieve(prompt)
+
             nodes = result or []
-            # Compose a minimal answer from retrieved contexts; you can swap in your own LLM later.
+            # synthesize an interim answer from top contexts
             parts = []
-            for i, n in enumerate(nodes[:5], 1):
-                try:
-                    txt = (getattr(n, "text", None) or n.get("text") or "").strip()
-                except Exception:
-                    txt = ""
+            for i, n in enumerate(nodes[: min(5, RETRIEVER_TOP_K)], 1):
+                txt = (getattr(n, "text", None) or getattr(n, "get", lambda *_: None)("text") or "").strip()
                 if txt:
                     parts.append(f"{i}. {txt[:700]}")
             answer = "Top retrieved context:\n\n" + ("\n\n".join(parts) if parts else "(no text returned)")
             sources = nodes
-
         else:
-            import openai, streamlit as st
-            if "openai" in st.secrets and "api_key" in st.secrets["openai"]:
-                openai.api_key = st.secrets["openai"]["api_key"]
-
             qe = idx.as_query_engine()
-            # Some backends accept system prompt or chat history; pass via kwargs if supported.
-            # Fallback to plain .query(prompt) if extras are not supported by the SDK version.
-            answer_text = None
-            resp_obj: Optional[Any] = None
             try:
-                # Attempt richer signature first
-                history_pairs = []
-                h = st.session_state.llama_chat[:-1]
-                for i in range(0, len(h), 2):
-                    u = h[i]["content"] if i < len(h) and h[i]["role"] == "user" else ""
-                    a = h[i+1]["content"] if i+1 < len(h) and h[i+1]["role"] == "assistant" else ""
-                    history_pairs.append({"user": u, "assistant": a})
+                # pass retriever prefs through if supported by this SDK build
                 resp_obj = qe.query(
                     prompt,
                     system_prompt=(system_prompt or None),
                     chat_history=history_pairs or None,
+                    similarity_top_k=RETRIEVER_TOP_K,
+                    similarity_cutoff=SIMILARITY_CUTOFF,
                 )
             except TypeError:
-                # SDK without extra parameters
                 resp_obj = qe.query(prompt)
 
-            # Normalize response object
-            answer_text = (
+            answer = (
                 getattr(resp_obj, "response", None)
                 or getattr(resp_obj, "answer", None)
                 or str(resp_obj)
             )
-            answer = (answer_text or "").strip()
-
-            # Pull sources if exposed
             sources = (
                 getattr(resp_obj, "source_nodes", None)
                 or getattr(resp_obj, "sources", None)
                 or []
             )
+
 
     except Exception as e:
         with st.chat_message("assistant"):
@@ -3306,8 +3397,9 @@ def show_llamaindex_chat() -> None:
         if rows:
             src_md = "\n\n**Sources**\n" + "\n".join(rows)
 
-    final = (answer or "(empty)").strip() + (src_md if src_md else "")
-
+    # ===== 3) use the formatter and show sources only if relevant =====
+    src_md = _format_sources(sources, min_score=0.62, max_items=3)
+    final = (answer or "(empty)").strip() + (("\n\n" + src_md) if src_md else "")
     with st.chat_message("assistant"):
         st.markdown(final)
 
