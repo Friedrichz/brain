@@ -3332,8 +3332,19 @@ def show_llamaindex_chat() -> None:
                 openai.api_key = st.secrets["openai"]["api_key"]
 
             qe = idx.as_query_engine()
+            # Some backends accept system prompt or chat history; pass via kwargs if supported.
+            # Fallback to plain .query(prompt) if extras are not supported by the SDK version.
+            answer_text = None
+            resp_obj: Optional[Any] = None
             try:
-                # pass retriever prefs through if supported by this SDK build
+                # Attempt richer signature first
+                history_pairs = []
+                h = st.session_state.llama_chat[:-1]
+                for i in range(0, len(h), 2):
+                    u = h[i]["content"] if i < len(h) and h[i]["role"] == "user" else ""
+                    a = h[i+1]["content"] if i+1 < len(h) and h[i+1]["role"] == "assistant" else ""
+                    history_pairs.append({"user": u, "assistant": a})
+                    
                 resp_obj = qe.query(
                     prompt,
                     system_prompt=(system_prompt or None),
