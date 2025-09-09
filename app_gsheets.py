@@ -3327,6 +3327,10 @@ def show_llamaindex_chat() -> None:
             answer = "Top retrieved context:\n\n" + ("\n\n".join(parts) if parts else "(no text returned)")
             sources = nodes
         else:
+            import openai, streamlit as st
+            if "openai" in st.secrets and "api_key" in st.secrets["openai"]:
+                openai.api_key = st.secrets["openai"]["api_key"]
+
             qe = idx.as_query_engine()
             try:
                 # pass retriever prefs through if supported by this SDK build
