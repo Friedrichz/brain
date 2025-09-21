@@ -2180,7 +2180,7 @@ def show_fund_monitor() -> None:
         with ng2:
             st.markdown("**Historical Net/Gross**")
             if {"date", "net", "gross"} <= set(fund_df.columns):
-                hist_df = fund_df[["date", "net", "gross"]].copy()
+                hist_df = fund_df[fund_df["file_type"] == file_type][["date", "net", "gross"]].copy()
                 hist_df["date"] = pd.to_datetime(hist_df["date"], errors="coerce")
                 hist_df["net"] = hist_df["net"].apply(_fm_percent_to_float)
                 hist_df["gross"] = hist_df["gross"].apply(_fm_percent_to_float)
