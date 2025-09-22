@@ -183,25 +183,78 @@ def load_sheet(sheet_id: str, worksheet: str) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 def parse_dict(cell: any) -> Dict[str, float]:
+    """
+    Robust parser for dict-like cells coming from Sheets.
+
+    Accepts:
+      - Real dicts: {"Energy": 1.3, "Materials": 37.5}
+      - JSON strings with quoted values: {"Energy": "1.3%", "Materials": "37.5%"}
+      - Bare dict-ish strings: {Energy: 1.3%, Materials: 37.5%}
+
+    Returns: {str -> float} with values in percentage points (e.g., 11.0 for "11.0%").
+    """
+    def _strip_quotes(s: str) -> str:
+        s = s.strip()
+        if len(s) >= 2 and ((s[0] == s[-1] == '"') or (s[0] == s[-1] == "'")):
+            return s[1:-1].strip()
+        return s
+
+    def _to_float(v) -> float | None:
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return None
+        s = str(v).strip()
+        s = _strip_quotes(s)
+        s = s.replace("%", "").strip()
+        try:
+            return float(s)
+        except Exception:
+            return None
+
     if cell is None or (isinstance(cell, float) and pd.isna(cell)):
         return {}
+
+    # Case 1: already a dict
     if isinstance(cell, dict):
-        return cell
-    text = str(cell).strip("{} ")
-    if not text:
+        out: Dict[str, float] = {}
+        for k, v in cell.items():
+            key = _strip_quotes(str(k))
+            num = _to_float(v)
+            if num is not None:
+                out[key] = num
+        return out
+
+    s = str(cell).strip()
+    if not s:
         return {}
-    result: Dict[str, float] = {}
-    for item in text.split(','):
-        if not item or ':' not in item:
+
+    # Case 2: try strict JSON first
+    try:
+        parsed = json.loads(s)
+        if isinstance(parsed, dict):
+            out: Dict[str, float] = {}
+            for k, v in parsed.items():
+                key = _strip_quotes(str(k))
+                num = _to_float(v)
+                if num is not None:
+                    out[key] = num
+            return out
+    except Exception:
+        pass
+
+    # Case 3: fallback naive splitter for bare dict-ish strings
+    if s.startswith("{") and s.endswith("}"):
+        s = s[1:-1]
+    out: Dict[str, float] = {}
+    for item in s.split(","):
+        if ":" not in item:
             continue
-        key, val = item.split(':', 1)
-        key = key.strip()
-        val = val.strip().replace('%', '')
-        try:
-            result[key] = float(val)
-        except ValueError:
-            result[key] = val
-    return result
+        k, v = item.split(":", 1)
+        key = _strip_quotes(k.strip())
+        num = _to_float(v)
+        if num is not None:
+            out[key] = num
+    return out
+
 
 def build_exposure_df(row: pd.Series, prefixes: List[str]) -> pd.DataFrame:
     parts: List[pd.DataFrame] = []
